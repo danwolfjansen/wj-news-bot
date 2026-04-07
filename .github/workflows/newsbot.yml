@@ -49,4 +49,5 @@ jobs:
           git config user.email "bot@wolfjansen.com"
           git add seen_stories.json
           git diff --staged --quiet || git commit -m "chore: update seen stories [skip ci]"
+          git pull --rebase origin main
           git push
