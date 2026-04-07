@@ -1,0 +1,6 @@
+.env
+news_bot.log
+news_bot_launchd.log
+pending_approvals.json
+__pycache__/
+*.pyc

@@ -1,0 +1,52 @@
+name: Wolf Jansen News Bot
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'   # 9:00 AM UTC, Monday–Friday
+  workflow_dispatch:          # Allow manual "Run workflow" from GitHub UI
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write         # Needed to commit seen_stories.json back to repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install feedparser anthropic requests python-dotenv
+
+      - name: Run news bot
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_HOST:          smtp.gmail.com
+          SMTP_PORT:          "587"
+          SMTP_USER:          ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:      ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM:         ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO:           ${{ secrets.EMAIL_TO }}
+          PA_APPROVE_URL:     ${{ secrets.PA_APPROVE_URL }}
+          PA_REJECT_URL:      ${{ secrets.PA_REJECT_URL }}
+          WP_URL:             https://wolfjansen.com
+          WP_USER:            ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD:    ${{ secrets.WP_APP_PASSWORD }}
+          MS_TENANT_ID:       ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID:       ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET:   ${{ secrets.MS_CLIENT_SECRET }}
+          MS_USER_EMAIL:      ${{ secrets.MS_USER_EMAIL }}
+        run: python news_bot.py
+
+      - name: Commit updated seen_stories.json
+        run: |
+          git config user.name  "WJ News Bot"
+          git config user.email "bot@wolfjansen.com"
+          git add seen_stories.json
+          git diff --staged --quiet || git commit -m "chore: update seen stories [skip ci]"
+          git push
