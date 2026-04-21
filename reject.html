@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wolf Jansen — Rejecting post</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f0f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 48px 40px;
+      max-width: 420px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }
+    .icon { font-size: 52px; margin-bottom: 16px; }
+    h1 { color: #1a1a1a; font-size: 22px; margin: 0 0 12px; }
+    p  { color: #666; font-size: 15px; line-height: 1.5; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" id="icon">⏳</div>
+    <h1 id="title">Rejecting post…</h1>
+    <p  id="msg">Please wait a moment.</p>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const encoded = params.get('url');
+    const token   = params.get('token');
+
+    function show(icon, title, msg) {
+      document.getElementById('icon').textContent  = icon;
+      document.getElementById('title').textContent = title;
+      document.getElementById('msg').textContent   = msg;
+    }
+
+    if (!encoded || !token) {
+      show('❌', 'Invalid link', 'This rejection link is missing required information.');
+    } else {
+      const paUrl = atob(encoded) + '&token=' + encodeURIComponent(token);
+      fetch(paUrl, { method: 'GET', mode: 'no-cors' })
+        .then(() => show('🚫', 'Post rejected', 'The post has been discarded.'))
+        .catch(() => show('❌', 'Something went wrong', 'Please try again or reject on desktop.'));
+    }
+  </script>
+</body>
+</html>

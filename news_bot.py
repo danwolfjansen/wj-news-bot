@@ -14,6 +14,7 @@ Schedule:       Add to cron / Mac launchd (see README)
 
 import feedparser
 import anthropic
+import base64
 import json
 import os
 import hashlib
@@ -467,13 +468,18 @@ the body with a link back to the original source at {story['link']}.
 # ---------------------------------------------------------------------------
 # STEP 3: Build & send approval email
 # ---------------------------------------------------------------------------
+_GITHUB_PAGES_BASE = "https://danwolfjansen.github.io/wj-news-bot"
+
+
+def _pages_url(action: str, pa_url: str, token: str) -> str:
+    """Build a GitHub Pages intermediary URL that avoids mobile app interception."""
+    encoded = base64.b64encode(pa_url.encode()).decode()
+    return f"{_GITHUB_PAGES_BASE}/{action}.html?url={encoded}&token={token}"
+
+
 def _post_card_html(token: str, title: str, excerpt: str, body: str, division: str) -> str:
-    approve_base = CONFIG["pa_approve_url"].rstrip("&")
-    reject_base  = CONFIG["pa_reject_url"].rstrip("&")
-    sep_a = "&" if "?" in approve_base else "?"
-    sep_r = "&" if "?" in reject_base else "?"
-    approve_url = f"{approve_base}{sep_a}token={token}"
-    reject_url  = f"{reject_base}{sep_r}token={token}"
+    approve_url = _pages_url("approve", CONFIG["pa_approve_url"], token)
+    reject_url  = _pages_url("reject",  CONFIG["pa_reject_url"],  token)
 
     colour = DIVISION_COLOURS.get(division, "#333")
     label  = DIVISION_LABELS.get(division, division.replace("-", " ").title())
@@ -648,15 +654,11 @@ def send_approval_email(new_drafts: list[dict]):
     # Plain text fallback
     plain_lines = [f"Wolf Jansen News Bot — {count} draft(s) for review\n"]
     for d in new_drafts:
-        approve_base = CONFIG["pa_approve_url"].rstrip("&")
-        reject_base  = CONFIG["pa_reject_url"].rstrip("&")
-        sep_a = "&" if "?" in approve_base else "?"
-        sep_r = "&" if "?" in reject_base else "?"
         plain_lines += [
             f"[{DIVISION_LABELS.get(d['division'], d['division'])}]",
             f"{d['title']}",
-            f"Approve: {approve_base}{sep_a}token={d['token']}",
-            f"Reject:  {reject_base}{sep_r}token={d['token']}\n",
+            f"Approve: {_pages_url('approve', CONFIG['pa_approve_url'], d['token'])}",
+            f"Reject:  {_pages_url('reject',  CONFIG['pa_reject_url'],  d['token'])}\n",
         ]
 
     recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
