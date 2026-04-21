@@ -2,7 +2,7 @@ name: Wolf Jansen News Bot
 
 on:
   schedule:
-    - cron: '0 9 * * 1-5'   # 9:00 AM UTC, Monday–Friday
+    - cron: '0 7 * * 1-5'   # 7:00 AM UTC = 9:00 AM CEST (summer) / 8:00 AM CET (winter)
   workflow_dispatch:          # Allow manual "Run workflow" from GitHub UI
 
 jobs:
