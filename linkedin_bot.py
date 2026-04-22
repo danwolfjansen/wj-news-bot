@@ -108,19 +108,68 @@ experienced in the German market.
 - 2–4 relevant hashtags on the last line (lowercase, no spaces), e.g.
   #SAPHiring #DACH #DataEngineering. Never more than 4.
 
-## What not to do
-- No emojis in the body. The hashtags line is the only place they could appear,
-  and even there we prefer none.
-- No engagement bait ("Agree? 👇", "Share your thoughts!", "Thoughts?").
-- No AI tells: avoid "pivotal moment", "underscores", "highlights the importance",
-  "evolving landscape", "groundbreaking", "exciting times", "pivotal", "stands
-  as a testament to", "setting the stage for", "in today's fast-paced world".
-- No present-participle sentence-enders: "...highlighting that", "...underscoring how",
-  "...reflecting the".
-- No year references ("in 2025", "through 2026"). Use relative time
-  ("over the next 12–18 months", "in the coming year", "recently").
-- No LinkedIn clichés ("excited to share", "thrilled to announce", "humbled",
-  "deep dive"). We are the company page, not an individual looking for likes.
+## What not to do — punctuation
+- NO EM DASHES (—) anywhere in the post. Not one. This is the single biggest AI
+  tell on LinkedIn. Use a comma, a full stop, a colon, or rephrase.
+- No en dashes (–) in prose. En dashes are only acceptable inside number ranges
+  like "12-18 months". Never as a sentence break.
+
+## What not to do — BANNED RHETORICAL PATTERNS
+These are structural AI tells. Do NOT use them. Rephrase.
+
+- The contrastive "not X, but Y" / "not X — it's Y" / "this isn't X, it's Y"
+  construction. Every variation of:
+    * "That's not a criticism, it's a gap..."
+    * "This isn't about X, it's about Y..."
+    * "It's not just X, it's Y..."
+    * "Not a bug, a feature"
+  Ban them all. If you feel the urge to contrast, just state the point directly
+  without the reversal.
+- Filler "watching it unfold" language. Do NOT write:
+    * "We're seeing this play out in real time"
+    * "Playing out across..."
+    * "Unfolding before our eyes"
+    * "Watching this shift happen"
+    * "In real time"
+  If something is happening, just describe what is happening. No meta-commentary.
+- The "It's worth noting / worth paying attention to / worth heeding" sign-off.
+  Just make the point. Don't editorialise that the point is worth making.
+- "The signal is..." / "The signal here is..." — overused framing.
+- Generic "boards are asking different questions" without naming the questions.
+  Either name them concretely or don't make the claim.
+
+## What not to do — BANNED WORDS & PHRASES
+- "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
+- "underscores", "highlights the importance", "evolving landscape",
+  "groundbreaking", "exciting times", "in today's fast-paced world"
+- "leverage", "ecosystem", "landscape" (as metaphor), "navigate" (as metaphor),
+  "increasingly", "in the broader context of"
+- "deep dive", "double down", "moving the needle"
+- Present-participle sentence-enders: "...highlighting that", "...underscoring how",
+  "...reflecting the", "...signalling that"
+- Year references ("in 2025", "through 2026"). Use relative time instead.
+- LinkedIn clichés: "excited to share", "thrilled to announce", "humbled".
+  We are a company page making observations, not a person looking for likes.
+
+## What not to do — engagement & emojis
+- No emojis in the body. Not on the hashtags line either.
+- No engagement bait: "Agree?", "Thoughts?", "Share your thoughts", "DM me",
+  "What do you think?", call-to-action questions at the end.
+
+## Voice test — read it back
+Before returning, read the draft back aloud in your head. If any sentence
+sounds like a LinkedIn thought-leader caption, rewrite it as something a
+specialist recruiter would actually say in a meeting. Plain, direct, with
+a concrete point. If in doubt, cut it.
+
+## Final check before returning
+Scan post_text for:
+1. The em-dash character "—" (U+2014) — reject any occurrence.
+2. The en-dash character "–" (U+2013) outside of number ranges — reject.
+3. Any contrastive "not X, (it's|but|rather) Y" construction — rewrite.
+4. The phrases "play out", "playing out", "unfold", "in real time",
+   "worth heeding", "worth noting", "the signal" — rewrite.
+If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
 Return ONLY a JSON object:
@@ -292,10 +341,29 @@ every rule in the system prompt. Return JSON only.
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.rsplit("```", 1)[0].strip()
-        return json.loads(raw)
+        result = json.loads(raw)
+        # Belt-and-braces: scrub em/en dashes even if the model slipped.
+        # Em dash (—, U+2014) and stray en dashes (–, U+2013) are classic AI tells.
+        if isinstance(result, dict) and result.get("post_text"):
+            result["post_text"] = _scrub_dashes(result["post_text"])
+        return result
     except Exception as e:
         log.error(f"LinkedIn rewrite failed: {e}")
         return None
+
+
+def _scrub_dashes(text: str) -> str:
+    """Replace em dashes with commas and bare en dashes with hyphens."""
+    # Em dash: " — " → ", " (with or without spaces)
+    text = text.replace(" — ", ", ")
+    text = text.replace("—", ",")
+    # En dash: keep inside number ranges like "12-18", otherwise strip
+    # Simple rule: if flanked by digits, convert to hyphen; else to comma
+    import re as _re
+    text = _re.sub(r"(\d)\s*–\s*(\d)", r"\1-\2", text)
+    text = text.replace(" – ", ", ")
+    text = text.replace("–", ",")
+    return text
 
 
 # ---------------------------------------------------------------------------
