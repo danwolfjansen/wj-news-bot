@@ -14,26 +14,19 @@ Schedule:       Add to cron / Mac launchd (see README)
 
 import feedparser
 import anthropic
-import base64
 import json
 import os
 import hashlib
 import logging
 import smtplib
 import uuid
-import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
 from typing import Optional
 from dotenv import load_dotenv
 
-# Resolve paths relative to this script's location, not the working directory.
-# This ensures launchd (which may not set WorkingDirectory) can always find
-# the .env file and write the log to the correct OneDrive folder.
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-load_dotenv(os.path.join(_SCRIPT_DIR, ".env"))
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # LOGGING
@@ -42,7 +35,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(os.path.join(_SCRIPT_DIR, "news_bot.log")),
+        logging.FileHandler("news_bot.log"),
         logging.StreamHandler()
     ]
 )
@@ -72,14 +65,8 @@ CONFIG = {
     "wp_user":     os.getenv("WP_USER", ""),
     "wp_password": os.getenv("WP_APP_PASSWORD", ""),
 
-    # OneDrive folder path (local synced path — Mac only)
+    # OneDrive folder path (local synced path)
     "onedrive_folder": os.getenv("ONEDRIVE_FOLDER", ""),
-
-    # Microsoft Graph API — used when running in GitHub Actions
-    "ms_tenant_id":     os.getenv("MS_TENANT_ID", ""),
-    "ms_client_id":     os.getenv("MS_CLIENT_ID", ""),
-    "ms_client_secret": os.getenv("MS_CLIENT_SECRET", ""),
-    "ms_user_email":    os.getenv("MS_USER_EMAIL", ""),  # e.g. dan@wolfjansen.com
 
     # How many stories per division per run
     "max_stories_per_division": 3,
@@ -146,72 +133,101 @@ You are writing content AS Wolf Jansen — speaking in the first person plural
 Wolf Jansen is a specialist recruitment firm focused on the DACH region
 (Germany, Austria, Switzerland). We operate across three divisions: SAP,
 Data & Digital, and Financial & Advisory. We have been recruiting in Germany
-since 2000. We are true headhunters — we do not advertise permanent roles or
-rely on job boards. We target passive candidates who are excelling in their
-current positions and are typically hidden from 95% of the market. Every
-consultant at Wolf Jansen is deeply experienced in the German market.
+since 2000. We are true headhunters. We target passive candidates who are
+excelling in their current positions and are typically hidden from 95% of the
+market. Consultants at Wolf Jansen bring a wide range of tenure and backgrounds,
+and are focused on the German market.
 
 ## Terminology rules
-- Say "DACH region" or "German market" — not just "Germany" when Austria/Switzerland are relevant
-- Say "passive candidates" or "passive talent" — this is central to our positioning
-- Say "specialist recruitment" — never "staffing" or "temp agency"
-- Say "consultants" — not "recruiters" when referring to our team
+- Say "DACH region" or "German market", not just "Germany" when Austria/Switzerland are relevant
+- Say "passive candidates" or "passive talent". This is central to our positioning
+- Say "specialist recruitment". Never "staffing" or "temp agency"
+- Say "consultants", not "recruiters" when referring to our team
 - Division names exactly: "SAP", "Data & Digital", "Financial & Advisory"
 
 ## Voice and tone
-- Always write as "we" — Wolf Jansen is speaking, not a third party writing about us
-- Confident and direct — we have deep expertise and a genuine point of view
-- Concise and scannable — our audience are senior professionals and decision-makers
-- Add real perspective — don't summarise the story, say what we think it means
+- Always write as "we". Wolf Jansen is speaking, not a third party writing about us
+- Confident and direct. We have deep expertise and a genuine point of view
+- Concise and scannable. Our audience are senior professionals and decision-makers
+- Add real perspective. Don't summarise the story, say what we think it means
   for talent, hiring trends, or the DACH market
-- Professional but not stuffy — authoritative without being dry
+- Professional but not stuffy. Authoritative without being dry
 - Never use recruitment clichés ("rockstar", "ninja", "dynamic team player")
-- Never reference specific years (e.g. "in 2025", "through 2026") — use relative
-  time references instead ("over the next 12–18 months", "in the coming year", "recently")
+- Never reference specific years (e.g. "in 2025", "through 2026"). Use relative
+  time references instead ("over the next 12-18 months", "in the coming year", "recently")
 
 ## Example of the right tone
-"We've seen this pattern before in our SAP practice — when a major vendor shifts
-strategy, the talent market follows within 12–18 months. Here's what we're watching."
+"We've seen this pattern before in our SAP practice. When a major vendor shifts
+strategy, the talent market follows within 12-18 months. Experience with the
+previous transition tends to become the most valuable thing on a CV."
 
 ## NEVER use these AI writing patterns
-These phrases make content sound machine-generated. Avoid all of them:
+These phrases make content sound machine-generated. Avoid all of them.
+
+### Banned punctuation
+- NO EM DASHES (—) anywhere in the title, excerpt, or body. Not one. This is
+  the single biggest AI tell. Use commas, full stops, colons, or rephrase.
+- No en dashes (–) in prose. En dashes are only acceptable inside number ranges
+  like "12-18 months". Never as a sentence break.
+
+### Banned rhetorical patterns (structural tells)
+- The contrastive "not X, it's Y" / "this isn't X, it's Y" / "not X — it's Y"
+  construction in any variation. Examples to avoid:
+    * "That's not a criticism, it's a gap..."
+    * "This isn't about X, it's about Y..."
+    * "It's not just X, it's Y..."
+  State the point directly. Don't do the rhetorical reversal.
+- "Playing out" / "unfolding" / "in real time" meta-narration:
+    * "We're seeing this play out in real time"
+    * "Watching this shift unfold"
+  If something is happening, just describe what is happening.
+- "Here's the [question/thing/reality/kicker/problem]..." rhetorical setup:
+    * "Here's the question we're asking clients:"
+    * "Here's what we're seeing:"
+    * "Here's the reality:"
+  No throat-clearing. State the point.
+- "Worth noting / worth paying attention to / worth heeding" sign-offs.
+- "The signal is..." / "The signal here is..." overused framing.
+- Generic "boards are asking different questions" without naming the questions.
+
+### Banned phrases
 - Significance puffery: "pivotal moment", "key turning point", "stands as a testament to",
   "is a reminder that", "underscores the importance of", "highlights its significance",
   "reflects broader", "marks a shift", "evolving landscape", "indelible mark",
   "deeply rooted", "setting the stage for", "focal point"
 - Tacked-on present participles: "...highlighting that", "...underscoring how",
   "...reflecting the", "...symbolizing its", "...contributing to the",
-  "...ensuring that", "...fostering a", "...encompassing"
+  "...ensuring that", "...fostering a", "...encompassing", "...signalling that"
 - Promotional fluff: "boasts a", "vibrant", "groundbreaking", "renowned",
   "showcasing", "exemplifies", "valuable insights", "align with", "resonate with",
   "commitment to excellence", "nestled", "in the heart of"
 - Vague attribution: "industry reports suggest", "experts argue", "observers note",
   "some critics say", "it has been described as", "is widely regarded as"
+- Corporate filler: "leverage", "ecosystem", "landscape" (as metaphor),
+  "navigate" (as metaphor), "increasingly", "in the broader context of",
+  "deep dive", "double down", "moving the needle"
 - Formulaic structure: Do NOT end with a "Challenges" section or "Future Outlook"
   paragraph. Do NOT write a conclusion that starts "Despite its challenges..."
 
-## Headline rules
-The title must be punchy and original. Use a wide variety of structures — rotate
-through these ten approaches and never use the same structure twice in one batch:
+## Voice test before returning
+Read the draft back as if a specialist recruiter were saying it in a meeting.
+If any sentence sounds like a thought-leader blog caption or a LinkedIn guru
+post, rewrite it. Plain, direct, with a concrete point.
 
-1. Direct market observation: "SAP is quietly reshaping how finance teams hire"
-2. Tension or contradiction: "More AI tools, fewer AI hires — the gap is widening"
-3. A question a senior professional would actually ask: "Is the CFO role becoming a tech role?"
-4. First-person trend report: "We're seeing a surge in SAP demand — here's why"
-5. A bold specific claim: "The data skills gap in DACH is three years ahead of where most firms think"
-6. The unexpected angle: "Nobody's talking about what this means for mid-level SAP managers"
-7. A hiring signal framed as news: "When HSBC moves like this, DACH banks follow within 18 months"
-8. The candidate's perspective: "Senior finance professionals are being asked to do something new"
-9. A market verdict: "The case for generalist CFOs just got weaker"
-10. A pattern we've spotted: "Three mandates this month alone — the Financial Advisory market is moving"
-
-"What this means for X" is permitted as structure 6 only if none of the others fit —
-it must never be the default. Never repeat a headline structure used elsewhere in the same batch.
+## Final check before returning
+Scan title, excerpt, and body for:
+1. Em-dash character "—" (U+2014). Reject any occurrence.
+2. En-dash character "–" (U+2013) outside number ranges. Reject.
+3. Contrastive "not X, (it's|but|rather) Y". Rewrite.
+4. The phrases "play out", "playing out", "unfold", "in real time",
+   "worth heeding", "worth noting", "the signal", "Here's the ",
+   "Here's what ". Rewrite.
+If any trigger fires, rewrite before outputting.
 
 ## Output format
 Return ONLY a JSON object with these fields:
 {
-  "title": "A punchy, original headline — see headline rules above",
+  "title": "A punchy, original headline written from our perspective (not copied from the source)",
   "excerpt": "2–3 sentences in first person, teasing our take on the story",
   "body": "The full post in HTML format. Use <p>, <h2>, <strong> tags as appropriate.
            Aim for 250–400 words. Write throughout as Wolf Jansen speaking — use 'we',
@@ -229,8 +245,6 @@ DIVISION_CATEGORY_IDS = {
     "data-digital":       30,
     "financial-advisory": 31,
 }
-
-LATEST_NEWS_CATEGORY_ID = 26  # All posts also go to Latest News
 
 DIVISION_COLOURS = {
     "sap":                "#1a6b3c",
@@ -267,42 +281,7 @@ def story_id(entry) -> str:
 # ---------------------------------------------------------------------------
 # HELPERS: pending drafts (stored in OneDrive)
 # ---------------------------------------------------------------------------
-def _running_in_cloud() -> bool:
-    """True when executing inside GitHub Actions."""
-    return os.getenv("GITHUB_ACTIONS") == "true"
-
-
-def _get_graph_token() -> str:
-    """Obtain a Microsoft Graph API access token via client credentials."""
-    url = (f"https://login.microsoftonline.com/"
-           f"{CONFIG['ms_tenant_id']}/oauth2/v2.0/token")
-    resp = requests.post(url, data={
-        "grant_type":    "client_credentials",
-        "client_id":     CONFIG["ms_client_id"],
-        "client_secret": CONFIG["ms_client_secret"],
-        "scope":         "https://graph.microsoft.com/.default",
-    }, timeout=15)
-    resp.raise_for_status()
-    return resp.json()["access_token"]
-
-
-def _onedrive_url(filename: str) -> str:
-    email = CONFIG["ms_user_email"]
-    return (f"https://graph.microsoft.com/v1.0/users/{email}"
-            f"/drive/root:/NewsBot/{filename}:/content")
-
-
 def load_pending() -> dict:
-    if _running_in_cloud():
-        try:
-            token = _get_graph_token()
-            resp  = requests.get(_onedrive_url("pending_approvals.json"),
-                                 headers={"Authorization": f"Bearer {token}"}, timeout=15)
-            if resp.status_code == 200:
-                return resp.json()
-        except Exception as e:
-            log.warning(f"Could not load pending from OneDrive: {e}")
-        return {}
     path = _pending_file_path()
     if os.path.exists(path):
         with open(path, "r") as f:
@@ -311,25 +290,9 @@ def load_pending() -> dict:
 
 
 def save_pending(data: dict):
-    content = json.dumps(data, indent=2)
-    if _running_in_cloud():
-        try:
-            token = _get_graph_token()
-            resp  = requests.put(
-                _onedrive_url("pending_approvals.json"),
-                headers={"Authorization": f"Bearer {token}",
-                         "Content-Type": "application/json"},
-                data=content.encode(),
-                timeout=15,
-            )
-            resp.raise_for_status()
-            log.info("  Drafts saved to: OneDrive/NewsBot/pending_approvals.json (Graph API)")
-        except Exception as e:
-            log.error(f"Failed to save pending to OneDrive: {e}")
-        return
     path = _pending_file_path()
     with open(path, "w") as f:
-        f.write(content)
+        json.dump(data, f, indent=2)
     log.info(f"  Drafts saved to: {path}")
 
 
@@ -346,7 +309,6 @@ def register_draft(token: str, title: str, excerpt: str, body: str,
         "category_slug": FEEDS[division]["wp_category_slug"],
         "category_name": FEEDS[division]["wp_category_name"],
         "category_id":  DIVISION_CATEGORY_IDS[division],
-        "category_ids": [DIVISION_CATEGORY_IDS[division], LATEST_NEWS_CATEGORY_ID],
         "used":         False,
         "created":      datetime.now(timezone.utc).isoformat(),
     }
@@ -459,27 +421,42 @@ the body with a link back to the original source at {story['link']}.
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.rsplit("```", 1)[0].strip()
-        return json.loads(raw)
+        result = json.loads(raw)
+        # Belt-and-braces: scrub em/en dashes from all text fields even if
+        # the model slipped. Em dash (—, U+2014) is the biggest AI tell.
+        if isinstance(result, dict):
+            for field in ("title", "excerpt", "body"):
+                if result.get(field) and isinstance(result[field], str):
+                    result[field] = _scrub_dashes(result[field])
+        return result
     except Exception as e:
         log.error(f"  Rewrite failed for '{story['title']}': {e}")
         return None
 
 
+def _scrub_dashes(text: str) -> str:
+    """Replace em dashes with commas and bare en dashes with hyphens."""
+    import re as _re
+    # Em dash: " — " → ", " (with or without surrounding spaces)
+    text = text.replace(" — ", ", ")
+    text = text.replace("—", ",")
+    # En dash: keep inside number ranges like "12-18", otherwise replace
+    text = _re.sub(r"(\d)\s*–\s*(\d)", r"\1-\2", text)
+    text = text.replace(" – ", ", ")
+    text = text.replace("–", ",")
+    return text
+
+
 # ---------------------------------------------------------------------------
 # STEP 3: Build & send approval email
 # ---------------------------------------------------------------------------
-_GITHUB_PAGES_BASE = "https://danwolfjansen.github.io/wj-news-bot"
-
-
-def _pages_url(action: str, pa_url: str, token: str) -> str:
-    """Build a GitHub Pages intermediary URL that avoids mobile app interception."""
-    encoded = base64.b64encode(pa_url.encode()).decode()
-    return f"{_GITHUB_PAGES_BASE}/{action}.html?url={encoded}&token={token}"
-
-
 def _post_card_html(token: str, title: str, excerpt: str, body: str, division: str) -> str:
-    approve_url = _pages_url("approve", CONFIG["pa_approve_url"], token)
-    reject_url  = _pages_url("reject",  CONFIG["pa_reject_url"],  token)
+    approve_base = CONFIG["pa_approve_url"].rstrip("&")
+    reject_base  = CONFIG["pa_reject_url"].rstrip("&")
+    sep_a = "&" if "?" in approve_base else "?"
+    sep_r = "&" if "?" in reject_base else "?"
+    approve_url = f"{approve_base}{sep_a}token={token}"
+    reject_url  = f"{reject_base}{sep_r}token={token}"
 
     colour = DIVISION_COLOURS.get(division, "#333")
     label  = DIVISION_LABELS.get(division, division.replace("-", " ").title())
@@ -538,51 +515,6 @@ def _post_card_html(token: str, title: str, excerpt: str, body: str, division: s
     </td>
   </tr>
 </table>"""
-
-
-def send_no_stories_email():
-    smtp_user = CONFIG["smtp_user"]
-    smtp_pass = CONFIG["smtp_password"]
-    if not smtp_user or not smtp_pass:
-        return
-
-    date_str   = datetime.now(timezone.utc).strftime("%d %B %Y")
-    subject    = f"Wolf Jansen News Bot — no new stories today ({date_str})"
-    recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
-
-    html_body = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:32px;background:#f0f0f0;
-             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:8px;
-              padding:32px;text-align:center;">
-    <img src="https://wolfjansen.com/wp-content/uploads/2024/03/WJ-Logo.png"
-         alt="Wolf Jansen" width="140" style="margin-bottom:24px;">
-    <h2 style="color:#1a1a1a;margin:0 0 12px;">No new stories today</h2>
-    <p style="color:#555;font-size:15px;line-height:1.6;margin:0;">
-      The bot ran at 08:01 and checked all feeds — nothing new to review for {date_str}.
-    </p>
-  </div>
-</body>
-</html>"""
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = CONFIG["email_from"]
-    msg["To"]      = ", ".join(recipients)
-    msg.attach(MIMEText(subject, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
-
-    try:
-        with smtplib.SMTP(CONFIG["smtp_host"], CONFIG["smtp_port"]) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(smtp_user, recipients, msg.as_string())
-        log.info(f"✉  No-stories notification sent to {', '.join(recipients)}")
-    except Exception as e:
-        log.error(f"Failed to send no-stories email: {e}")
 
 
 def send_approval_email(new_drafts: list[dict]):
@@ -654,11 +586,15 @@ def send_approval_email(new_drafts: list[dict]):
     # Plain text fallback
     plain_lines = [f"Wolf Jansen News Bot — {count} draft(s) for review\n"]
     for d in new_drafts:
+        approve_base = CONFIG["pa_approve_url"].rstrip("&")
+        reject_base  = CONFIG["pa_reject_url"].rstrip("&")
+        sep_a = "&" if "?" in approve_base else "?"
+        sep_r = "&" if "?" in reject_base else "?"
         plain_lines += [
             f"[{DIVISION_LABELS.get(d['division'], d['division'])}]",
             f"{d['title']}",
-            f"Approve: {_pages_url('approve', CONFIG['pa_approve_url'], d['token'])}",
-            f"Reject:  {_pages_url('reject',  CONFIG['pa_reject_url'],  d['token'])}\n",
+            f"Approve: {approve_base}{sep_a}token={d['token']}",
+            f"Reject:  {reject_base}{sep_r}token={d['token']}\n",
         ]
 
     recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
@@ -684,31 +620,10 @@ def send_approval_email(new_drafts: list[dict]):
 # ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
-def wait_for_network(host="smtp.gmail.com", port=587, timeout=60):
-    """Wait up to `timeout` seconds for network/DNS to be ready after wake."""
-    import socket, time
-    for attempt in range(timeout):
-        try:
-            socket.setdefaulttimeout(3)
-            socket.getaddrinfo(host, port)
-            if attempt > 0:
-                log.info(f"Network ready after {attempt}s.")
-            return True
-        except socket.gaierror:
-            if attempt == 0:
-                log.info("Waiting for network...")
-            time.sleep(1)
-    log.error(f"Network not available after {timeout}s — aborting.")
-    return False
-
-
 def main():
     log.info("=" * 60)
     log.info(f"Wolf Jansen News Bot — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     log.info("=" * 60)
-
-    if not wait_for_network():
-        return
 
     seen = load_seen_stories()
     log.info(f"Already processed: {len(seen)} stories")
@@ -759,8 +674,7 @@ def main():
     if new_drafts:
         send_approval_email(new_drafts)
     else:
-        log.info("No new stories found — sending notification.")
-        send_no_stories_email()
+        log.info("No new stories found — nothing to send.")
 
     log.info("=" * 60)
 
