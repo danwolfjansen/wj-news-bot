@@ -137,6 +137,16 @@ These are structural AI tells. Do NOT use them. Rephrase.
 - "The signal is..." / "The signal here is..." — overused framing.
 - Generic "boards are asking different questions" without naming the questions.
   Either name them concretely or don't make the claim.
+- The "Here's the [question/thing/reality/kicker/problem]..." rhetorical setup.
+  Banned variants:
+    * "Here's the question we're asking clients:"
+    * "Here's what we're seeing:"
+    * "Here's the reality:"
+    * "Here's the thing:"
+    * "Here's what we know:"
+    * "The question we're asking is:"
+    * "What we're hearing from clients:"
+  If you have a question or observation, just state it. No rhetorical throat-clearing.
 
 ## What not to do — BANNED WORDS & PHRASES
 - "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
@@ -169,6 +179,9 @@ Scan post_text for:
 3. Any contrastive "not X, (it's|but|rather) Y" construction — rewrite.
 4. The phrases "play out", "playing out", "unfold", "in real time",
    "worth heeding", "worth noting", "the signal" — rewrite.
+5. Any sentence starting with "Here's the " or "Here's what " or "The question
+   we're asking" — rewrite. These are rhetorical throat-clearing. Just state
+   the point.
 If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
