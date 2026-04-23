@@ -523,125 +523,120 @@ _IMAGE_STYLE_TEMPLATE = (
 
 def _build_story_concepts(entry: dict, count: int,
                            anthropic_client: anthropic.Anthropic) -> list[str]:
-    """Ask Claude Haiku for N *distinct* editorial photograph concepts."""
+    """Ask Claude Haiku for N *story-anchored* photograph concepts.
+
+    The prompt forces a two-step process: (1) list concrete visual nouns
+    actually mentioned or strongly implied in the story, (2) build each
+    scene around a DIFFERENT one of those nouns. This stops the model
+    retreating to generic tech imagery when the story header contains
+    words like 'AI'.
+    """
     title   = (entry.get("title", "")   or "")[:200]
-    excerpt = (entry.get("excerpt", "") or "")[:800]
+    excerpt = (entry.get("excerpt", "") or "")[:1000]
     prompt = (
-        "You are an editorial photo editor at the Financial Times. A reporter "
-        "has filed the story below and you need to brief your staff "
-        f"photographer on {count} DIFFERENT lead-photo options to shoot. Each "
-        "option is a distinct scene — different subject matter, different "
-        "framing, different distance. Not variations of the same shot.\n\n"
-        "FIRST — read the story and classify it:\n"
-        "  A. CONCRETE NEWS: names a specific event, person, company action, "
-        "place, or moment that can be photographed directly.\n"
-        "  B. COMMENTARY / TREND PIECE: analysis about a sector, technology, "
-        "policy, or market pattern. No single event or location to shoot.\n\n"
-        "FOR TYPE A — anchor scenes to the story\'s specifics: the company "
-        "HQ doorway, a figure at a podium, a specific plant / port / lab / "
-        "neighbourhood, a boardroom mid-meeting with anonymous figures.\n\n"
-        "FOR TYPE B — anchor scenes to the PHYSICAL INFRASTRUCTURE of the "
-        "sector discussed. Pick shots that visually signal the topic:\n"
-        "  * Enterprise software / SAP / cloud / AI / chips / NVIDIA / GPUs / "
-        "data-centre / ML: a server rack with blue LEDs glowing in a dark "
-        "data-centre aisle; a close-up of a GPU board on a matte black bench "
-        "under a single overhead light; a gloved hand placing a silicon wafer "
-        "onto a clean-room tray; a cable-management panel with neat bundles "
-        "of fibre; a technician (shot from behind) walking a cold-aisle "
-        "between server cabinets.\n"
-        "  * Pharma / biotech: amber vials on a stainless-steel bench; a "
-        "pharmaceutical packaging line at rest with blister packs on a "
-        "stainless conveyor; a gloved hand holding a pipette over a "
-        "multi-well plate.\n"
-        "  * Automotive / manufacturing: an unpainted body shell on a "
-        "conveyor under hanging work-lights; a factory floor at shift change; "
-        "a robotic arm paused mid-motion.\n"
-        "  * Logistics: stacked shipping containers at a port at dusk; gantry "
-        "cranes silhouetted; a long-exposure of a warehouse aisle.\n"
-        "  * Energy: transmission pylons against a cold dawn sky; a wind "
-        "turbine nacelle close-up; a substation in blue hour.\n"
-        "  * Finance: a Bloomberg-terminal-style glow on a trader\'s desk "
-        "(no readable data); a stack of printed quarterly reports on a "
-        "wooden desk.\n"
-        "  * Healthcare: a hospital corridor at shift change, a stethoscope "
-        "on a linen coat, a scan on a light box.\n"
-        "  * Retail / consumer: empty aisles before opening, a shopfront at "
-        "blue hour, a stockroom pallet.\n\n"
-        f"FORCE VARIETY — the {count} options must differ along at least two "
-        "of these axes:\n"
-        "  - Scale: wide establishing vs close-up detail vs mid-range\n"
-        "  - Subject: pure infrastructure (no people) vs anonymous human at "
-        "work vs place/exterior\n"
-        "  - Light: daylight vs dusk/blue hour vs interior artificial\n"
-        "  - Vantage: ground level vs elevated vs over-the-shoulder\n\n"
-        "HARD BANS (do NOT propose any of these — they are overused clichés "
-        "and we just got three of them):\n"
-        "  - A person in a dress shirt walking down an office corridor\n"
-        "  - A person carrying a laptop or papers through a hallway\n"
-        "  - Generic corporate office interiors with rows of closed doors\n"
-        "  - Revolving doors of a glass office building\n"
-        "  - Empty boardroom at dusk with papers on the table\n"
-        "  - Hands on a keyboard with code-blur overlay\n"
-        "  - Abstract patterns, geometric shapes, symbolic compositions\n\n"
-        "Constraints for every concept:\n"
-        "  - If a person is in frame: anonymous only (shot from behind, in "
-        "profile, face obscured, face out of focus, or at a distance). Never "
-        "name a real public figure.\n"
-        "  - No readable logos, brand names, or signage.\n"
-        "  - Generic equipment categories, not specific branded models.\n"
-        "  - A real physical scene — place, light, objects — never an "
-        "abstraction.\n\n"
-        f"Story title: {title}\n"
-        f"Story excerpt: {excerpt}\n\n"
-        f"Output EXACTLY {count} lines, numbered 1. 2. 3. Each line is ONE "
-        "sentence (25-45 words) describing that photograph, including "
-        "lighting, framing, and at least one specific detail that ties the "
-        "scene to THIS story or its sector. No preamble, no labels, no "
-        "commentary — just the numbered lines."
+        "You are an editorial photo editor at the Financial Times. Read the "
+        "story below and brief a photographer on " + str(count) + " DIFFERENT "
+        "lead-photo options — one per shoot. Each option is built around a "
+        "different concrete visual subject that appears in or is strongly "
+        "implied by THIS story.\n\n"
+        "WORK IN TWO STEPS.\n\n"
+        "STEP 1 — list 5 concrete visual nouns or places a photographer "
+        "could literally point a camera at, drawn from the story. A visual "
+        "noun is a thing you can photograph: \'a container ship\', \'a "
+        "warehouse floor\', \'a robotic arm\', \'a retail checkout\', \'a "
+        "hospital ward\', \'a factory conveyor\', \'a wind turbine\', \'an "
+        "airport gate\', \'a packed conference hall\'. Only list nouns that "
+        "match THIS story, not generic tech props.\n\n"
+        "STEP 2 — propose " + str(count) + " distinct photographs, each "
+        "centred on a DIFFERENT noun from your list. Each scene must include "
+        "that noun plainly visible in frame. Vary framing: at least one "
+        "close-up detail and at least one wide / environmental shot across "
+        "the set.\n\n"
+        "CRITICAL: if the story is about PHYSICAL OPERATIONS (manufacturing, "
+        "logistics, warehousing, retail floors, supply chain, robotics, "
+        "industrial equipment, hospital operations, factory automation, "
+        "physical infrastructure), the scenes MUST show physical operations "
+        "— not data centres, not server racks, not chips. The word \'AI\' in "
+        "a headline does NOT mean \'photograph a chip\'. Read the story "
+        "body to see what the AI is ACTUALLY doing.\n\n"
+        "HARD BANS — do NOT propose any of these, they are the clichés we "
+        "keep getting:\n"
+        "  * A figure walking down a corridor, hallway, aisle, server "
+        "aisle, tunnel — any \'person in perspective vanishing into "
+        "darkness\' composition.\n"
+        "  * A close-up of an isolated graphics card or GPU on a desk with "
+        "a lamp.\n"
+        "  * A silicon wafer being inspected with tweezers (unless the "
+        "story is SPECIFICALLY about semiconductor manufacturing).\n"
+        "  * A lone server rack glowing blue in a dark room (unless the "
+        "story is SPECIFICALLY about data-centre infrastructure).\n"
+        "  * Hands typing on a keyboard with code-blur overlay.\n"
+        "  * Empty boardrooms, empty trading floors, skyline shots, "
+        "revolving doors, corporate lobbies.\n"
+        "  * Abstract compositions, geometric patterns, symbolic imagery.\n\n"
+        "CONSTRAINTS for every scene:\n"
+        "  * If a person is in frame: anonymous (from behind, in profile, "
+        "face obscured or out of focus, or at a distance). Never identify a "
+        "real public figure.\n"
+        "  * No readable logos, brand names, signage, or legible text.\n"
+        "  * Generic equipment categories, never specific named products.\n"
+        "  * A real documentary photograph, not CGI or illustration.\n"
+        "  * Must be tied to the specific story content — if you would "
+        "propose the same shot for any other story in the sector, it is "
+        "wrong.\n\n"
+        "EXAMPLE WORKFLOW (on a different story):\n"
+        "  Story: \'Maersk diverts around the Red Sea, pushing freight rates "
+        "higher\'\n"
+        "  Visual nouns: container ship, port quayside, gantry crane, "
+        "stacked shipping containers, a lorry at a dock gate\n"
+        "  3 scenes:\n"
+        "    1. A container ship\'s stacked hull seen from water level at "
+        "dawn, orange port lights reflecting off dark waves, shallow focus "
+        "on the waterline.\n"
+        "    2. A nearly empty quayside at dusk, two gantry cranes "
+        "silhouetted against a violet sky, a lone lorry pulling away into "
+        "the yard.\n"
+        "    3. Stacked containers photographed from low angle at golden "
+        "hour, long shadows across grey concrete, a dockworker in hi-vis "
+        "shot from behind at the edge of frame.\n\n"
+        "Now do the same for this story.\n\n"
+        "Story title: " + title + "\n"
+        "Story excerpt: " + excerpt + "\n\n"
+        "OUTPUT FORMAT — follow exactly, no preamble:\n"
+        "NOUNS: comma-separated list of 5 visual nouns\n"
+        "1. [scene description, 25-45 words, one sentence, includes lighting + framing + the noun + at least one detail from the story]\n"
+        "2. [...]\n"
+        + ("3. [...]\n" if count >= 3 else "")
+        + ("4. [...]\n" if count >= 4 else "")
     )
     concepts: list[str] = []
     try:
         resp = anthropic_client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=600,
+            max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = (resp.content[0].text or "").strip()
-        # Parse numbered lines like "1. ..." / "1) ..." / "1 ..."
+        log.info(f"Concept builder raw output:\n{raw}")
         for line in raw.splitlines():
             line = line.strip()
             if not line:
                 continue
-            cleaned = re.sub(r"^\s*\d+[\.\)]?\s*", "", line)
-            cleaned = cleaned.strip().strip('"').strip("'")
+            if line.upper().startswith("NOUNS"):
+                continue
+            m = re.match(r"^\s*(\d+)[\.\)]\s*(.+)$", line)
+            if not m:
+                continue
+            cleaned = m.group(2).strip().strip('"').strip("'")
             if len(cleaned) > 15:
                 concepts.append(cleaned[:600])
         concepts = concepts[:count]
     except Exception as e:
         log.warning(f"Concept distillation failed: {e}")
 
-    # Fallback ladder — sector-infrastructure scenes, no office corridors.
-    fallback_pool = [
-        ("A close-up of a single modern GPU card on a matte black bench, cooling "
-         "fans and heat-sink fins lit from one side by a warm desk lamp, shallow "
-         "depth of field, the rest of the workspace falling into darkness"),
-        ("A cold-aisle view of a data centre at night, two rows of server "
-         "cabinets receding into perspective, faint blue LEDs along the fronts, "
-         "a figure in dark clothes shot from behind walking between the racks"),
-        ("A silicon wafer reflecting pale blue clean-room light on a gloved "
-         "hand, a pair of tweezers entering from the top of frame, the "
-         "background falling off into soft out-of-focus overhead panels"),
-        ("A cable-management panel on a server rack, hundreds of orange fibre "
-         "patch cables coiled neatly into bundles, low-angle side light, the "
-         "corridor beyond in shallow out-of-focus depth"),
-        ("A laptop open on a desk at night, its screen angled away from "
-         "camera so no text is readable, the keyboard illuminated, a coffee "
-         "cup and a notebook in the foreground, window city lights blurred "
-         "behind"),
-    ]
-    while len(concepts) < count and fallback_pool:
-        concepts.append(fallback_pool.pop(0))
-    return concepts[:count]
+    # No hardcoded fallback pool — if Haiku fails, we generate fewer images
+    # rather than poison the output with generic chip/data-centre shots.
+    return concepts
 
 
 def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]:
