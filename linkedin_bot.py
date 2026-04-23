@@ -389,7 +389,7 @@ def pick_best(pool: list[dict], client: anthropic.Anthropic) -> Optional[dict]:
         )
     listing = "\n\n".join(numbered)
 
-prompt = f"""You are picking ONE story from the list below to turn into a Wolf Jansen
+    prompt = f"""You are picking ONE story from the list below to turn into a Wolf Jansen
 LinkedIn company-page post. The audience is senior DACH hiring and talent
 leaders — CFOs, CIOs, HR Directors, heads of SAP practices, managing partners
 at search firms. They scroll LinkedIn on their phone. We need a story that
