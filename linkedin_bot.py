@@ -389,11 +389,32 @@ def pick_best(pool: list[dict], client: anthropic.Anthropic) -> Optional[dict]:
         )
     listing = "\n\n".join(numbered)
 
-    prompt = f"""You are picking ONE story from the list below to turn into a Wolf Jansen
-LinkedIn company-page post. We want the item with the strongest point of view,
-the most relevance to senior DACH hiring/talent, and the best chance of sparking
-professional conversation. Avoid items that are purely announcement-shaped,
-vendor PR, or too narrow.
+prompt = f"""You are picking ONE story from the list below to turn into a Wolf Jansen
+LinkedIn company-page post. The audience is senior DACH hiring and talent
+leaders — CFOs, CIOs, HR Directors, heads of SAP practices, managing partners
+at search firms. They scroll LinkedIn on their phone. We need a story that
+makes them stop scrolling.
+
+STRONGLY PREFER stories with:
+  - A named person moving (new hire, exit, promotion, firing, board change)
+  - A named company event (acquisition, layoff, funding, restructure, insolvency, exit)
+  - A specific number or outcome (EUR X deal size, Y% revenue shift, Z headcount cut)
+  - A counterintuitive data point or surprising finding with a specific source
+  - Conflict, controversy, or an unexpected position taken by a known name
+  - Direct relevance to DACH SAP, finance, or HR hiring markets
+
+STRONGLY AVOID:
+  - Trend pieces and "state of the industry" essays
+  - "5 things to watch" or "what we are seeing" commentary
+  - Vendor PR or product launches with no headcount / M&A / hiring implication
+  - Generic thought leadership with no named subject
+  - Stories about the industry at large with no specific actor or event
+
+Tie-breakers, in order:
+  1. Story with a named person or company beats anonymous trend
+  2. Story with a specific number beats vague directional claim
+  3. DACH relevance beats global
+  4. Published this week beats older
 
 List:
 {listing}
