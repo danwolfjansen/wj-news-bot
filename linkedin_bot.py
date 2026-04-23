@@ -313,12 +313,17 @@ def candidate_pool() -> list[dict]:
 
     # Which source_tokens have already been turned into a LinkedIn post?
     # (Any entry in pending_linkedin.json that's already fired / rejected.)
-    linkedin_pending = load_linkedin_pending()
-    already_consumed = {
-        e.get("source_token")
-        for e in linkedin_pending.values()
-        if e.get("used") or e.get("rejected")
-    }
+    ignore_consumed = os.getenv("LINKEDIN_IGNORE_CONSUMED", "false").lower() == "true"
+    if ignore_consumed:
+        log.info("LINKEDIN_IGNORE_CONSUMED=true — re-picking stories regardless of prior use/rejection.")
+        already_consumed = set()
+    else:
+        linkedin_pending = load_linkedin_pending()
+        already_consumed = {
+            e.get("source_token")
+            for e in linkedin_pending.values()
+            if e.get("used") or e.get("rejected")
+        }
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=LINKEDIN_CONFIG["lookback_days"])
     pool = []

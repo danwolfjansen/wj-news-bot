@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '0 7 * * 4'   # Thursdays 07:00 UTC = 09:00 CEST (summer) / 08:00 CET (winter)
   workflow_dispatch:        # Allow manual "Run workflow" from GitHub UI
+    inputs:
+      ignore_consumed:
+        description: 'Re-pick stories even if already shared/rejected (for testing image gen)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: write    # Required to commit generated images back to the repo
@@ -47,6 +56,7 @@ jobs:
           PA_LINKEDIN_APPROVE_URL:  ${{ secrets.PA_LINKEDIN_APPROVE_URL }}
           PA_LINKEDIN_REJECT_URL:   ${{ secrets.PA_LINKEDIN_REJECT_URL }}
           LINKEDIN_LOOKBACK_DAYS:   "7"
+          LINKEDIN_IGNORE_CONSUMED: ${{ github.event.inputs.ignore_consumed || 'false' }}
           # Auto-injected by Actions; used to commit images via Contents API
           GITHUB_TOKEN:             ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY:        ${{ github.repository }}
