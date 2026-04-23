@@ -521,7 +521,6 @@ _IMAGE_STYLE_TEMPLATE = (
     "grain, vintage aesthetic, stock-photo look, or anything that does not "
     "look like a real documentary photograph."
 )
-)
 
 
 def _build_story_concept(entry: dict, anthropic_client: anthropic.Anthropic) -> str:
