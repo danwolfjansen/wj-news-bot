@@ -35,16 +35,16 @@ try:
 except ImportError:
     OpenAI = None  # type: ignore  # image generation will be skipped if not installed
 
-# Reuse helpers / config from the existing news bot so we stay DRY.
+# Reuse config + labels from the existing news bot so we stay DRY.
 # (news_bot.py lives next to this file — same repo root.)
+# NOTE: we do NOT import load_pending from news_bot, because that implementation
+# only reads from the local OneDrive sync folder. In GitHub Actions the folder
+# doesn't exist, so we implement a cloud-aware load_pending below that uses the
+# Microsoft Graph API when running in the cloud.
 from news_bot import (
     CONFIG,
     DIVISION_COLOURS,
     DIVISION_LABELS,
-    _get_graph_token,
-    _onedrive_url,
-    _running_in_cloud,
-    load_pending,
 )
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +81,88 @@ LINKEDIN_CONFIG = {
 }
 
 _GITHUB_PAGES_BASE = "https://danwolfjansen.github.io/wj-news-bot"
+
+
+# ---------------------------------------------------------------------------
+# OneDrive / Microsoft Graph helpers (only used when running in GitHub Actions)
+# ---------------------------------------------------------------------------
+# The local news_bot reads pending_approvals.json from a synced OneDrive folder
+# on Dan's Mac. In GitHub Actions there is no synced folder, so we fall back to
+# the Microsoft Graph API with the app registration whose credentials are in
+# the repo secrets (MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET).
+_MS_CONFIG = {
+    "tenant_id":     os.getenv("MS_TENANT_ID", ""),
+    "client_id":     os.getenv("MS_CLIENT_ID", ""),
+    "client_secret": os.getenv("MS_CLIENT_SECRET", ""),
+    "user_email":    os.getenv("MS_USER_EMAIL", ""),
+    # The OneDrive folder (relative to the user's drive root) where the news
+    # bot keeps its JSON state files.
+    "onedrive_folder": os.getenv("MS_ONEDRIVE_FOLDER", "NewsBot"),
+}
+
+
+def _running_in_cloud() -> bool:
+    """True when executing inside GitHub Actions (no local OneDrive sync)."""
+    return os.getenv("GITHUB_ACTIONS", "").lower() == "true"
+
+
+def _get_graph_token() -> str:
+    """Client-credentials OAuth flow against Microsoft Graph."""
+    tenant = _MS_CONFIG["tenant_id"]
+    resp = requests.post(
+        f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        data={
+            "client_id":     _MS_CONFIG["client_id"],
+            "client_secret": _MS_CONFIG["client_secret"],
+            "scope":         "https://graph.microsoft.com/.default",
+            "grant_type":    "client_credentials",
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+def _onedrive_url(filename: str) -> str:
+    """Graph API URL to the given filename in the NewsBot OneDrive folder."""
+    user   = _MS_CONFIG["user_email"]
+    folder = _MS_CONFIG["onedrive_folder"].strip("/")
+    return (
+        f"https://graph.microsoft.com/v1.0/users/{user}"
+        f"/drive/root:/{folder}/{filename}:/content"
+    )
+
+
+def load_pending() -> dict:
+    """
+    Cloud-aware wrapper around the news_bot pending-approvals store.
+    - In GitHub Actions: pulls pending_approvals.json via Graph API.
+    - Locally: reads from the OneDrive sync folder configured in news_bot CONFIG.
+    """
+    if _running_in_cloud():
+        try:
+            token = _get_graph_token()
+            resp  = requests.get(
+                _onedrive_url("pending_approvals.json"),
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            log.warning(
+                f"Graph load of pending_approvals.json returned "
+                f"{resp.status_code}: {resp.text[:200]}"
+            )
+        except Exception as e:
+            log.error(f"Graph load of pending_approvals.json failed: {e}")
+        return {}
+
+    folder = CONFIG.get("onedrive_folder", "").strip()
+    path = os.path.join(folder, "pending_approvals.json") if folder else "pending_approvals.json"
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {}
 
 
 # ---------------------------------------------------------------------------
