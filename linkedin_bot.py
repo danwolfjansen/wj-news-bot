@@ -478,7 +478,7 @@ def _scrub_dashes(text: str) -> str:
 # ---------------------------------------------------------------------------
 # STEP 4b: Generate DALL-E image candidates for the LinkedIn post
 # ---------------------------------------------------------------------------
-   _IMAGE_STYLE_TEMPLATE = (
+_IMAGE_STYLE_TEMPLATE = (
     "Editorial photography in the style of a serious business publication "
     "(Financial Times, The Economist, Bloomberg Businessweek). Cinematic "
     "lighting, shallow depth of field, clear real-world subject matter with "
