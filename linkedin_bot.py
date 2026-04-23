@@ -521,71 +521,127 @@ _IMAGE_STYLE_TEMPLATE = (
 )
 
 
-def _build_story_concept(entry: dict, anthropic_client: anthropic.Anthropic) -> str:
-    """Ask Claude Haiku to propose a concrete, story-specific photograph."""
+def _build_story_concepts(entry: dict, count: int,
+                           anthropic_client: anthropic.Anthropic) -> list[str]:
+    """Ask Claude Haiku for N *distinct* editorial photograph concepts."""
     title   = (entry.get("title", "")   or "")[:200]
     excerpt = (entry.get("excerpt", "") or "")[:800]
     prompt = (
         "You are an editorial photo editor at the Financial Times. A reporter "
-        "has filed the story below and you need a lead photo to run with it. "
-        "Propose a single concrete scene a staff photographer could shoot "
-        "TODAY that would illustrate THIS specific story — not a generic "
-        "industry vibe.\n\n"
-        "Read the story carefully and identify: the specific company or "
-        "organisation, the specific person or role involved (if any), the "
-        "specific event or decision being reported, and the specific setting "
-        "where it happened or would happen.\n\n"
-        "Then describe a scene that connects to those specifics. Good scenes "
-        "anchor to something concrete in the story:\n"
-        "  - the doorway of the company\'s HQ building, morning light, an "
-        "employee walking in with a coffee\n"
-        "  - a figure shot from behind at a podium, conference hall half-lit, "
-        "a blurred audience in the foreground (for a keynote / announcement)\n"
-        "  - a figure in a suit photographed from behind looking out a "
-        "high-floor office window onto a specific skyline (for an executive "
-        "move / appointment story)\n"
-        "  - a specific street corner, neighbourhood, plant exterior, airport "
-        "gate, port, lab, hospital corridor, retail floor, courtroom, factory "
-        "door — whatever is physically tied to the story\n"
-        "  - hands on a keyboard, a boardroom table mid-meeting with anonymous "
-        "figures, a lone commuter on an empty platform at dawn\n\n"
-        "Scenes to avoid:\n"
-        "  - generic empty boardrooms, trading floors, server rooms, or "
-        "skyline shots that could illustrate any story in the sector\n"
-        "  - abstract / symbolic compositions (\'geometric shapes representing "
-        "change\', \'abstract patterns of data\')\n"
-        "  - anything that reads as a stock photo cliché\n\n"
-        "Constraints:\n"
-        "  - If a person is in frame, describe them anonymously: shot from "
-        "behind, in profile, face obscured, face out of focus, or at a "
-        "distance. Never name a real public figure.\n"
-        "  - No readable logos, brand names, or signage in frame.\n"
-        "  - Describe generic equipment (\'a pharmaceutical packaging line\'), "
-        "not a specific named manufacturer\'s model.\n"
-        "  - Must be a real physical scene — place, light, objects, optionally "
-        "an anonymous human figure — not a pattern or abstraction.\n\n"
+        "has filed the story below and you need to brief your staff "
+        f"photographer on {count} DIFFERENT lead-photo options to shoot. Each "
+        "option is a distinct scene — different subject matter, different "
+        "framing, different distance. Not variations of the same shot.\n\n"
+        "FIRST — read the story and classify it:\n"
+        "  A. CONCRETE NEWS: names a specific event, person, company action, "
+        "place, or moment that can be photographed directly.\n"
+        "  B. COMMENTARY / TREND PIECE: analysis about a sector, technology, "
+        "policy, or market pattern. No single event or location to shoot.\n\n"
+        "FOR TYPE A — anchor scenes to the story\'s specifics: the company "
+        "HQ doorway, a figure at a podium, a specific plant / port / lab / "
+        "neighbourhood, a boardroom mid-meeting with anonymous figures.\n\n"
+        "FOR TYPE B — anchor scenes to the PHYSICAL INFRASTRUCTURE of the "
+        "sector discussed. Pick shots that visually signal the topic:\n"
+        "  * Enterprise software / SAP / cloud / AI / chips / NVIDIA / GPUs / "
+        "data-centre / ML: a server rack with blue LEDs glowing in a dark "
+        "data-centre aisle; a close-up of a GPU board on a matte black bench "
+        "under a single overhead light; a gloved hand placing a silicon wafer "
+        "onto a clean-room tray; a cable-management panel with neat bundles "
+        "of fibre; a technician (shot from behind) walking a cold-aisle "
+        "between server cabinets.\n"
+        "  * Pharma / biotech: amber vials on a stainless-steel bench; a "
+        "pharmaceutical packaging line at rest with blister packs on a "
+        "stainless conveyor; a gloved hand holding a pipette over a "
+        "multi-well plate.\n"
+        "  * Automotive / manufacturing: an unpainted body shell on a "
+        "conveyor under hanging work-lights; a factory floor at shift change; "
+        "a robotic arm paused mid-motion.\n"
+        "  * Logistics: stacked shipping containers at a port at dusk; gantry "
+        "cranes silhouetted; a long-exposure of a warehouse aisle.\n"
+        "  * Energy: transmission pylons against a cold dawn sky; a wind "
+        "turbine nacelle close-up; a substation in blue hour.\n"
+        "  * Finance: a Bloomberg-terminal-style glow on a trader\'s desk "
+        "(no readable data); a stack of printed quarterly reports on a "
+        "wooden desk.\n"
+        "  * Healthcare: a hospital corridor at shift change, a stethoscope "
+        "on a linen coat, a scan on a light box.\n"
+        "  * Retail / consumer: empty aisles before opening, a shopfront at "
+        "blue hour, a stockroom pallet.\n\n"
+        f"FORCE VARIETY — the {count} options must differ along at least two "
+        "of these axes:\n"
+        "  - Scale: wide establishing vs close-up detail vs mid-range\n"
+        "  - Subject: pure infrastructure (no people) vs anonymous human at "
+        "work vs place/exterior\n"
+        "  - Light: daylight vs dusk/blue hour vs interior artificial\n"
+        "  - Vantage: ground level vs elevated vs over-the-shoulder\n\n"
+        "HARD BANS (do NOT propose any of these — they are overused clichés "
+        "and we just got three of them):\n"
+        "  - A person in a dress shirt walking down an office corridor\n"
+        "  - A person carrying a laptop or papers through a hallway\n"
+        "  - Generic corporate office interiors with rows of closed doors\n"
+        "  - Revolving doors of a glass office building\n"
+        "  - Empty boardroom at dusk with papers on the table\n"
+        "  - Hands on a keyboard with code-blur overlay\n"
+        "  - Abstract patterns, geometric shapes, symbolic compositions\n\n"
+        "Constraints for every concept:\n"
+        "  - If a person is in frame: anonymous only (shot from behind, in "
+        "profile, face obscured, face out of focus, or at a distance). Never "
+        "name a real public figure.\n"
+        "  - No readable logos, brand names, or signage.\n"
+        "  - Generic equipment categories, not specific branded models.\n"
+        "  - A real physical scene — place, light, objects — never an "
+        "abstraction.\n\n"
         f"Story title: {title}\n"
         f"Story excerpt: {excerpt}\n\n"
-        "Return ONE sentence (25-50 words) describing the photograph. Include "
+        f"Output EXACTLY {count} lines, numbered 1. 2. 3. Each line is ONE "
+        "sentence (25-45 words) describing that photograph, including "
         "lighting, framing, and at least one specific detail that ties the "
-        "scene to THIS story. No quotes, no prefix, no label — just the "
-        "sentence."
+        "scene to THIS story or its sector. No preamble, no labels, no "
+        "commentary — just the numbered lines."
     )
+    concepts: list[str] = []
     try:
         resp = anthropic_client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=250,
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
-        concept = (resp.content[0].text or "").strip().strip('"').strip("'")
-        if concept:
-            return concept[:600]
+        raw = (resp.content[0].text or "").strip()
+        # Parse numbered lines like "1. ..." / "1) ..." / "1 ..."
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            cleaned = re.sub(r"^\s*\d+[\.\)]?\s*", "", line)
+            cleaned = cleaned.strip().strip('"').strip("'")
+            if len(cleaned) > 15:
+                concepts.append(cleaned[:600])
+        concepts = concepts[:count]
     except Exception as e:
         log.warning(f"Concept distillation failed: {e}")
-    # Fallback — a safe, neutral editorial scene.
-    return ("A figure in a dark suit photographed from behind, walking through "
-            "the revolving door of a glass-fronted office building at morning, "
-            "soft diffused daylight, shallow depth of field")
+
+    # Fallback ladder — sector-infrastructure scenes, no office corridors.
+    fallback_pool = [
+        ("A close-up of a single modern GPU card on a matte black bench, cooling "
+         "fans and heat-sink fins lit from one side by a warm desk lamp, shallow "
+         "depth of field, the rest of the workspace falling into darkness"),
+        ("A cold-aisle view of a data centre at night, two rows of server "
+         "cabinets receding into perspective, faint blue LEDs along the fronts, "
+         "a figure in dark clothes shot from behind walking between the racks"),
+        ("A silicon wafer reflecting pale blue clean-room light on a gloved "
+         "hand, a pair of tweezers entering from the top of frame, the "
+         "background falling off into soft out-of-focus overhead panels"),
+        ("A cable-management panel on a server rack, hundreds of orange fibre "
+         "patch cables coiled neatly into bundles, low-angle side light, the "
+         "corridor beyond in shallow out-of-focus depth"),
+        ("A laptop open on a desk at night, its screen angled away from "
+         "camera so no text is readable, the keyboard illuminated, a coffee "
+         "cup and a notebook in the foreground, window city lights blurred "
+         "behind"),
+    ]
+    while len(concepts) < count and fallback_pool:
+        concepts.append(fallback_pool.pop(0))
+    return concepts[:count]
 
 
 def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]:
@@ -655,9 +711,12 @@ def generate_image_candidates(entry: dict, token: str,
         log.info("OpenAI not configured, skipping image generation.")
         return []
 
-    concept = _build_story_concept(entry, anthropic_client)
-    prompt  = _IMAGE_STYLE_TEMPLATE.format(concept=concept)
-    log.info(f"Image concept: {concept}")
+    concepts = _build_story_concepts(entry, count, anthropic_client)
+    if not concepts:
+        log.warning("No concepts produced, skipping images.")
+        return []
+    for i, c in enumerate(concepts, 1):
+        log.info(f"Concept #{i}: {c}")
 
     try:
         openai_client = OpenAI(api_key=api_key)
@@ -665,13 +724,13 @@ def generate_image_candidates(entry: dict, token: str,
         log.error(f"OpenAI client init failed: {e}")
         return []
 
-    # Generate all candidates in parallel to keep runtime down (each call ~15-30s).
+    # Generate all candidates in parallel — one distinct concept per call.
     png_bytes_by_idx: dict[int, bytes] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
-        futures = {
-            pool.submit(_generate_one_image, openai_client, prompt, i + 1): i + 1
-            for i in range(count)
-        }
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(concepts)) as pool:
+        futures = {}
+        for i, c in enumerate(concepts, 1):
+            p = _IMAGE_STYLE_TEMPLATE.format(concept=c)
+            futures[pool.submit(_generate_one_image, openai_client, p, i)] = i
         for fut in concurrent.futures.as_completed(futures):
             idx = futures[fut]
             result = fut.result()
