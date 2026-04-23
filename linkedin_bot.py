@@ -521,122 +521,155 @@ _IMAGE_STYLE_TEMPLATE = (
 )
 
 
+def _haiku_json_concepts(anthropic_client: anthropic.Anthropic,
+                         user_prompt: str) -> list[str]:
+    """Call Haiku, parse JSON {scenes:[...]}, return list of scene strings."""
+    resp = anthropic_client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=900,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    raw = (resp.content[0].text or "").strip()
+    log.info(f"Haiku raw output:\n{raw}")
+
+    # Strip ```json fences if present
+    stripped = raw
+    if stripped.startswith("```"):
+        # remove first line (``` or ```json) and trailing ```
+        lines = stripped.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines)
+
+    # Find the first {...} JSON object in the string
+    start = stripped.find("{")
+    end   = stripped.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        log.warning("No JSON object in Haiku output.")
+        return []
+
+    blob = stripped[start : end + 1]
+    try:
+        obj = json.loads(blob)
+    except json.JSONDecodeError as e:
+        log.warning(f"Haiku JSON parse failed: {e}")
+        return []
+
+    scenes = obj.get("scenes")
+    if not isinstance(scenes, list):
+        log.warning(f"Haiku JSON missing 'scenes' list: keys={list(obj.keys())}")
+        return []
+
+    cleaned = []
+    for s in scenes:
+        if not isinstance(s, str):
+            continue
+        s = s.strip().strip('"').strip("'")
+        if len(s) > 15:
+            cleaned.append(s[:600])
+    return cleaned
+
+
 def _build_story_concepts(entry: dict, count: int,
                            anthropic_client: anthropic.Anthropic) -> list[str]:
-    """Ask Claude Haiku for N *story-anchored* photograph concepts.
-
-    The prompt forces a two-step process: (1) list concrete visual nouns
-    actually mentioned or strongly implied in the story, (2) build each
-    scene around a DIFFERENT one of those nouns. This stops the model
-    retreating to generic tech imagery when the story header contains
-    words like 'AI'.
-    """
+    """Ask Claude Haiku for N story-anchored photograph concepts, as JSON."""
     title   = (entry.get("title", "")   or "")[:200]
-    excerpt = (entry.get("excerpt", "") or "")[:1000]
-    prompt = (
+    excerpt = (entry.get("excerpt", "") or "")[:1200]
+
+    primary_prompt = (
         "You are an editorial photo editor at the Financial Times. Read the "
-        "story below and brief a photographer on " + str(count) + " DIFFERENT "
-        "lead-photo options — one per shoot. Each option is built around a "
-        "different concrete visual subject that appears in or is strongly "
-        "implied by THIS story.\n\n"
-        "WORK IN TWO STEPS.\n\n"
-        "STEP 1 — list 5 concrete visual nouns or places a photographer "
-        "could literally point a camera at, drawn from the story. A visual "
-        "noun is a thing you can photograph: \'a container ship\', \'a "
-        "warehouse floor\', \'a robotic arm\', \'a retail checkout\', \'a "
-        "hospital ward\', \'a factory conveyor\', \'a wind turbine\', \'an "
-        "airport gate\', \'a packed conference hall\'. Only list nouns that "
-        "match THIS story, not generic tech props.\n\n"
-        "STEP 2 — propose " + str(count) + " distinct photographs, each "
-        "centred on a DIFFERENT noun from your list. Each scene must include "
-        "that noun plainly visible in frame. Vary framing: at least one "
-        "close-up detail and at least one wide / environmental shot across "
-        "the set.\n\n"
-        "CRITICAL: if the story is about PHYSICAL OPERATIONS (manufacturing, "
-        "logistics, warehousing, retail floors, supply chain, robotics, "
-        "industrial equipment, hospital operations, factory automation, "
-        "physical infrastructure), the scenes MUST show physical operations "
-        "— not data centres, not server racks, not chips. The word \'AI\' in "
-        "a headline does NOT mean \'photograph a chip\'. Read the story "
-        "body to see what the AI is ACTUALLY doing.\n\n"
-        "HARD BANS — do NOT propose any of these, they are the clichés we "
-        "keep getting:\n"
-        "  * A figure walking down a corridor, hallway, aisle, server "
-        "aisle, tunnel — any \'person in perspective vanishing into "
-        "darkness\' composition.\n"
-        "  * A close-up of an isolated graphics card or GPU on a desk with "
-        "a lamp.\n"
-        "  * A silicon wafer being inspected with tweezers (unless the "
-        "story is SPECIFICALLY about semiconductor manufacturing).\n"
-        "  * A lone server rack glowing blue in a dark room (unless the "
-        "story is SPECIFICALLY about data-centre infrastructure).\n"
-        "  * Hands typing on a keyboard with code-blur overlay.\n"
-        "  * Empty boardrooms, empty trading floors, skyline shots, "
-        "revolving doors, corporate lobbies.\n"
-        "  * Abstract compositions, geometric patterns, symbolic imagery.\n\n"
+        "story below and propose " + str(count) + " DIFFERENT lead-photo "
+        "options. Each option is built around a different concrete visual "
+        "subject drawn from the story itself.\n\n"
+        "TWO-STEP PROCESS:\n"
+        "  STEP 1 — list 5 concrete visual nouns or places you could "
+        "literally point a camera at, drawn from this story. A visual noun "
+        "is a photographable thing: \'a warehouse floor\', \'a robotic arm\', "
+        "\'a conveyor\', \'a container ship\', \'a hospital ward\', \'a wind "
+        "turbine\', \'a retail checkout\'. Only list nouns that match THIS "
+        "story, not generic tech props.\n"
+        "  STEP 2 — describe " + str(count) + " photographs, each centred on "
+        "a DIFFERENT noun. Each scene 25-45 words, one sentence, with "
+        "lighting + framing + the noun + at least one detail tied to the "
+        "specific story.\n\n"
+        "CRITICAL — if the story is about physical operations (manufacturing, "
+        "logistics, warehousing, retail, robotics, industrial equipment, "
+        "hospital ops, factory automation), the scenes MUST show physical "
+        "operations, not data centres or chips. The word \'AI\' in a headline "
+        "does NOT mean \'photograph a chip\' — read the story body.\n\n"
+        "HARD BANS — do NOT propose any of these clichés:\n"
+        "  - A figure walking into a vanishing point (corridor, hallway, "
+        "server aisle, tunnel, any perspective shot with a figure receding).\n"
+        "  - A graphics card or GPU isolated on a desk with a lamp.\n"
+        "  - A silicon wafer under tweezers (unless the story is "
+        "specifically about semiconductor manufacturing).\n"
+        "  - A lone server rack glowing blue in a dark room (unless the "
+        "story is specifically about data-centre infrastructure).\n"
+        "  - Hands on a keyboard with code-blur overlay.\n"
+        "  - Empty boardrooms, empty trading floors, skyline establishing "
+        "shots, revolving doors, corporate lobbies.\n"
+        "  - Abstract patterns, geometric shapes, symbolic compositions.\n\n"
         "CONSTRAINTS for every scene:\n"
-        "  * If a person is in frame: anonymous (from behind, in profile, "
-        "face obscured or out of focus, or at a distance). Never identify a "
-        "real public figure.\n"
-        "  * No readable logos, brand names, signage, or legible text.\n"
-        "  * Generic equipment categories, never specific named products.\n"
-        "  * A real documentary photograph, not CGI or illustration.\n"
-        "  * Must be tied to the specific story content — if you would "
-        "propose the same shot for any other story in the sector, it is "
-        "wrong.\n\n"
-        "EXAMPLE WORKFLOW (on a different story):\n"
-        "  Story: \'Maersk diverts around the Red Sea, pushing freight rates "
-        "higher\'\n"
-        "  Visual nouns: container ship, port quayside, gantry crane, "
-        "stacked shipping containers, a lorry at a dock gate\n"
-        "  3 scenes:\n"
-        "    1. A container ship\'s stacked hull seen from water level at "
-        "dawn, orange port lights reflecting off dark waves, shallow focus "
-        "on the waterline.\n"
-        "    2. A nearly empty quayside at dusk, two gantry cranes "
-        "silhouetted against a violet sky, a lone lorry pulling away into "
-        "the yard.\n"
-        "    3. Stacked containers photographed from low angle at golden "
-        "hour, long shadows across grey concrete, a dockworker in hi-vis "
-        "shot from behind at the edge of frame.\n\n"
+        "  - If a person is in frame: anonymous (from behind, in profile, "
+        "face obscured or out of focus, or at a distance).\n"
+        "  - No readable logos, brand names, or signage.\n"
+        "  - Generic equipment categories, not specific named products.\n"
+        "  - A real documentary photograph, not CGI.\n\n"
+        "WORKED EXAMPLE (different story): Story = \'Maersk diverts around "
+        "the Red Sea, pushing freight rates higher.\' Visual nouns: container "
+        "ship, port quayside, gantry crane, stacked shipping containers, "
+        "dockworker in hi-vis. 3 scenes: (1) A container ship\'s stacked "
+        "hull seen from water level at dawn, orange port lights reflecting "
+        "off dark waves, shallow focus on the waterline. (2) A nearly empty "
+        "quayside at dusk, two gantry cranes silhouetted against a violet "
+        "sky, a lone lorry pulling away into the yard. (3) Stacked "
+        "containers from low angle at golden hour, long shadows across grey "
+        "concrete, a hi-vis dockworker shot from behind at the edge of "
+        "frame.\n\n"
         "Now do the same for this story.\n\n"
         "Story title: " + title + "\n"
         "Story excerpt: " + excerpt + "\n\n"
-        "OUTPUT FORMAT — follow exactly, no preamble:\n"
-        "NOUNS: comma-separated list of 5 visual nouns\n"
-        "1. [scene description, 25-45 words, one sentence, includes lighting + framing + the noun + at least one detail from the story]\n"
-        "2. [...]\n"
-        + ("3. [...]\n" if count >= 3 else "")
-        + ("4. [...]\n" if count >= 4 else "")
+        "OUTPUT FORMAT — return ONLY a single JSON object, no prose, no "
+        "markdown fence, no preamble:\n"
+        '{"nouns": ["...", "...", "...", "...", "..."], '
+        '"scenes": ["scene 1 sentence", "scene 2 sentence"'
+        + (', "scene 3 sentence"' if count >= 3 else "")
+        + (', "scene 4 sentence"' if count >= 4 else "")
+        + "]}"
     )
-    concepts: list[str] = []
-    try:
-        resp = anthropic_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=800,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = (resp.content[0].text or "").strip()
-        log.info(f"Concept builder raw output:\n{raw}")
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.upper().startswith("NOUNS"):
-                continue
-            m = re.match(r"^\s*(\d+)[\.\)]\s*(.+)$", line)
-            if not m:
-                continue
-            cleaned = m.group(2).strip().strip('"').strip("'")
-            if len(cleaned) > 15:
-                concepts.append(cleaned[:600])
-        concepts = concepts[:count]
-    except Exception as e:
-        log.warning(f"Concept distillation failed: {e}")
 
-    # No hardcoded fallback pool — if Haiku fails, we generate fewer images
-    # rather than poison the output with generic chip/data-centre shots.
-    return concepts
+    concepts = []
+    try:
+        concepts = _haiku_json_concepts(anthropic_client, primary_prompt)
+    except Exception as e:
+        log.warning(f"Haiku concept call failed: {e}")
+
+    if len(concepts) < count:
+        log.warning(f"Haiku returned {len(concepts)} concepts; expected {count}. Retrying simpler.")
+        retry_prompt = (
+            "Read the story below and describe " + str(count) + " different "
+            "documentary photographs that could illustrate it. Each photo "
+            "must feature a concrete physical subject drawn from the story "
+            "(not generic tech or office imagery). One sentence each, 25-40 "
+            "words, with lighting and framing. Anonymous people only (from "
+            "behind, out of focus). No logos, no named products. Do NOT "
+            "propose: office corridors, server aisles with a figure walking "
+            "away, isolated GPUs on desks, silicon wafers with tweezers, "
+            "boardrooms, or skylines.\n\n"
+            "Story title: " + title + "\n"
+            "Story excerpt: " + excerpt + "\n\n"
+            "Return ONLY JSON: {\"scenes\": [\"...\", \"...\"" +
+            (", \"...\"" if count >= 3 else "") +
+            (", \"...\"" if count >= 4 else "") +
+            "]}"
+        )
+        try:
+            concepts = _haiku_json_concepts(anthropic_client, retry_prompt)
+        except Exception as e:
+            log.warning(f"Haiku retry failed: {e}")
+
+    return concepts[:count]
 
 
 def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]:
