@@ -120,4 +120,1106 @@ def _get_graph_token() -> str:
         timeout=15,
     )
     resp.raise_for_status()
-    return resp.json()
+    return resp.json()["access_token"]
+
+
+def _onedrive_url(filename: str) -> str:
+    """Graph API URL to the given filename in the NewsBot OneDrive folder."""
+    user   = _MS_CONFIG["user_email"]
+    folder = _MS_CONFIG["onedrive_folder"].strip("/")
+    return (
+        f"https://graph.microsoft.com/v1.0/users/{user}"
+        f"/drive/root:/{folder}/{filename}:/content"
+    )
+
+
+def load_pending() -> dict:
+    """
+    Cloud-aware wrapper around the news_bot pending-approvals store.
+    - In GitHub Actions: pulls pending_approvals.json via Graph API.
+    - Locally: reads from the OneDrive sync folder configured in news_bot CONFIG.
+    """
+    if _running_in_cloud():
+        try:
+            token = _get_graph_token()
+            resp  = requests.get(
+                _onedrive_url("pending_approvals.json"),
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            log.warning(
+                f"Graph load of pending_approvals.json returned "
+                f"{resp.status_code}: {resp.text[:200]}"
+            )
+        except Exception as e:
+            log.error(f"Graph load of pending_approvals.json failed: {e}")
+        return {}
+
+    folder = CONFIG.get("onedrive_folder", "").strip()
+    path = os.path.join(folder, "pending_approvals.json") if folder else "pending_approvals.json"
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# LINKEDIN POST PROMPT — adapted from REWRITE_SYSTEM_PROMPT, tuned for LI
+# ---------------------------------------------------------------------------
+LINKEDIN_SYSTEM_PROMPT = """
+You are writing a LinkedIn post AS Wolf Jansen — speaking in the first person plural
+("we", "our", "in our experience") on behalf of the company page.
+
+## Who we are
+Wolf Jansen is a specialist recruitment firm focused on the DACH region
+(Germany, Austria, Switzerland). We operate across three divisions: SAP,
+Data & Digital, and Financial & Advisory. We have been recruiting in Germany
+since 2000. We are true headhunters — we do not rely on job boards. We target
+passive candidates who are excelling in their current positions and are typically
+hidden from 95% of the market. Every consultant at Wolf Jansen is deeply
+experienced in the German market.
+
+## Terminology rules
+- Say "DACH region" or "German market" — not just "Germany" when Austria/Switzerland are relevant
+- Say "passive candidates" or "passive talent" — this is central to our positioning
+- Say "specialist recruitment" — never "staffing" or "temp agency"
+- Say "consultants" — not "recruiters" when referring to our team
+- Division names exactly: "SAP", "Data & Digital", "Financial & Advisory"
+
+## LinkedIn format rules
+- Length: 150-250 words. Longer than a tweet, shorter than a blog post.
+- Open with a hook in the first line — a sharp observation, a question, or a
+  concrete number. No preamble. No "we recently published a post about...".
+- Use short paragraphs — 1 to 3 lines each. LinkedIn readers skim.
+- Keep a line break between paragraphs (blank line).
+- Write in our voice throughout: confident, direct, with a genuine point of view.
+- Say what we think this means for hiring, talent movement, or the DACH market.
+  Don't just summarise — add perspective.
+- End with a subtle nudge back to the full post. The final paragraph should
+  reference "Read the full take on wolfjansen.com" or similar — only if a
+  wp_post_url is provided. If no URL is available, end with a pointed closing
+  thought instead (no dangling CTA).
+- 2-4 relevant hashtags on the last line (lowercase, no spaces), e.g.
+  #SAPHiring #DACH #DataEngineering. Never more than 4.
+
+## What not to do — punctuation
+- NO EM DASHES (—) anywhere in the post. Not one. This is the single biggest AI
+  tell on LinkedIn. Use a comma, a full stop, a colon, or rephrase.
+- No en dashes (–) in prose. En dashes are only acceptable inside number ranges
+  like "12-18 months". Never as a sentence break.
+
+## What not to do — BANNED RHETORICAL PATTERNS
+These are structural AI tells. Do NOT use them. Rephrase.
+
+- The contrastive "not X, but Y" / "not X — it's Y" / "this isn't X, it's Y"
+  construction. Every variation of:
+    * "That's not a criticism, it's a gap..."
+    * "This isn't about X, it's about Y..."
+    * "It's not just X, it's Y..."
+    * "Not a bug, a feature"
+  Ban them all. If you feel the urge to contrast, just state the point directly
+  without the reversal.
+- Filler "watching it unfold" language. Do NOT write:
+    * "We're seeing this play out in real time"
+    * "Playing out across..."
+    * "Unfolding before our eyes"
+    * "Watching this shift happen"
+    * "In real time"
+  If something is happening, just describe what is happening. No meta-commentary.
+- The "It's worth noting / worth paying attention to / worth heeding" sign-off.
+  Just make the point. Don't editorialise that the point is worth making.
+- "The signal is..." / "The signal here is..." — overused framing.
+- Generic "boards are asking different questions" without naming the questions.
+  Either name them concretely or don't make the claim.
+- The "Here's the [question/thing/reality/kicker/problem]..." rhetorical setup.
+  Banned variants:
+    * "Here's the question we're asking clients:"
+    * "Here's what we're seeing:"
+    * "Here's the reality:"
+    * "Here's the thing:"
+    * "Here's what we know:"
+    * "The question we're asking is:"
+    * "What we're hearing from clients:"
+  If you have a question or observation, just state it. No rhetorical throat-clearing.
+
+## What not to do — BANNED WORDS & PHRASES
+- "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
+- "underscores", "highlights the importance", "evolving landscape",
+  "groundbreaking", "exciting times", "in today's fast-paced world"
+- "leverage", "ecosystem", "landscape" (as metaphor), "navigate" (as metaphor),
+  "increasingly", "in the broader context of"
+- "deep dive", "double down", "moving the needle"
+- Present-participle sentence-enders: "...highlighting that", "...underscoring how",
+  "...reflecting the", "...signalling that"
+- Year references ("in 2025", "through 2026"). Use relative time instead.
+- LinkedIn clichés: "excited to share", "thrilled to announce", "humbled".
+  We are a company page making observations, not a person looking for likes.
+
+## What not to do — engagement & emojis
+- No emojis in the body. Not on the hashtags line either.
+- No engagement bait: "Agree?", "Thoughts?", "Share your thoughts", "DM me",
+  "What do you think?", call-to-action questions at the end.
+
+## Voice test — read it back
+Before returning, read the draft back aloud in your head. If any sentence
+sounds like a LinkedIn thought-leader caption, rewrite it as something a
+specialist recruiter would actually say in a meeting. Plain, direct, with
+a concrete point. If in doubt, cut it.
+
+## Final check before returning
+Scan post_text for:
+1. The em-dash character "—" (U+2014) — reject any occurrence.
+2. The en-dash character "–" (U+2013) outside of number ranges — reject.
+3. Any contrastive "not X, (it's|but|rather) Y" construction — rewrite.
+4. The phrases "play out", "playing out", "unfold", "in real time",
+   "worth heeding", "worth noting", "the signal" — rewrite.
+5. Any sentence starting with "Here's the " or "Here's what " or "The question
+   we're asking" — rewrite. These are rhetorical throat-clearing. Just state
+   the point.
+If any trigger fires, rewrite the sentence before outputting.
+
+## Output format
+Return ONLY a JSON object:
+{
+  "post_text": "The full LinkedIn post body, including line breaks (use \\n\\n between paragraphs) and the hashtags line at the end.",
+  "hook":      "The first line of the post, repeated here for the email preview.",
+  "word_count": 187
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# STEP 1: Candidate pool — published stories from the past N days
+# ---------------------------------------------------------------------------
+def _parse_iso(ts: str) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        # Accept trailing Z or offset form
+        ts = ts.replace("Z", "+00:00")
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+
+
+def candidate_pool() -> list[dict]:
+    """All approved+published entries from pending_approvals.json in the lookback window."""
+    pending = load_pending()
+    if not pending:
+        log.info("No pending_approvals.json content returned — pool empty.")
+        return []
+
+    # Which source_tokens have already been turned into a LinkedIn post?
+    # (Any entry in pending_linkedin.json that's already fired / rejected.)
+    ignore_consumed = os.getenv("LINKEDIN_IGNORE_CONSUMED", "false").lower() == "true"
+    if ignore_consumed:
+        log.info("LINKEDIN_IGNORE_CONSUMED=true — re-picking stories regardless of prior use/rejection.")
+        already_consumed = set()
+    else:
+        linkedin_pending = load_linkedin_pending()
+        already_consumed = {
+            e.get("source_token")
+            for e in linkedin_pending.values()
+            if e.get("used") or e.get("rejected")
+        }
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=LINKEDIN_CONFIG["lookback_days"])
+    pool = []
+    for token, entry in pending.items():
+        if not entry.get("used"):
+            continue  # not yet published to WordPress
+        created = _parse_iso(entry.get("created", ""))
+        if not created:
+            continue
+        if created < cutoff:
+            continue
+        if token in already_consumed:
+            continue  # already turned into a LinkedIn post or rejected
+        pool.append({"token": token, **entry})
+
+    log.info(f"Candidate pool: {len(pool)} published post(s) in the last "
+             f"{LINKEDIN_CONFIG['lookback_days']} days.")
+    return pool
+
+
+# ---------------------------------------------------------------------------
+# STEP 2: Try to find the published wolfjansen.com URL for a draft
+# ---------------------------------------------------------------------------
+def resolve_wp_url(entry: dict) -> Optional[str]:
+    """Look up the live WordPress URL via the WP REST API (search by title)."""
+    wp_url  = CONFIG.get("wp_url", "https://wolfjansen.com").rstrip("/")
+    wp_user = CONFIG.get("wp_user", "")
+    wp_pass = CONFIG.get("wp_password", "")
+    title   = entry.get("title", "").strip()
+    if not (wp_url and title):
+        return None
+    try:
+        resp = requests.get(
+            f"{wp_url}/wp-json/wp/v2/posts",
+            params={"search": title[:80], "per_page": 5, "status": "publish"},
+            auth=(wp_user, wp_pass) if wp_user and wp_pass else None,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        posts = resp.json() or []
+        # Best match: exact (rendered) title equality, else first result
+        for p in posts:
+            rendered = (p.get("title", {}).get("rendered") or "").strip()
+            if rendered.lower() == title.lower():
+                return p.get("link")
+        if posts:
+            return posts[0].get("link")
+    except Exception as e:
+        log.warning(f"WP URL lookup failed for '{title}': {e}")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# STEP 3: Pick the single most LinkedIn-worthy story
+# ---------------------------------------------------------------------------
+def pick_best(pool: list[dict], client: anthropic.Anthropic) -> Optional[dict]:
+    if not pool:
+        return None
+    if len(pool) == 1:
+        return pool[0]
+
+    # Build a compact list for Claude to rank.
+    numbered = []
+    for i, e in enumerate(pool, start=1):
+        numbered.append(
+            f"{i}. [{DIVISION_LABELS.get(e['division'], e['division'])}] "
+            f"{e.get('title','')}\n   {e.get('excerpt','')[:300]}"
+        )
+    listing = "\n\n".join(numbered)
+
+    prompt = f"""You are picking ONE story from the list below to turn into a Wolf Jansen
+LinkedIn company-page post. The audience is senior DACH hiring and talent
+leaders — CFOs, CIOs, HR Directors, heads of SAP practices, managing partners
+at search firms. They scroll LinkedIn on their phone. We need a story that
+makes them stop scrolling.
+
+STRONGLY PREFER stories with:
+  - A named person moving (new hire, exit, promotion, firing, board change)
+  - A named company event (acquisition, layoff, funding, restructure, insolvency, exit)
+  - A specific number or outcome (EUR X deal size, Y% revenue shift, Z headcount cut)
+  - A counterintuitive data point or surprising finding with a specific source
+  - Conflict, controversy, or an unexpected position taken by a known name
+  - Direct relevance to DACH SAP, finance, or HR hiring markets
+
+STRONGLY AVOID:
+  - Trend pieces and "state of the industry" essays
+  - "5 things to watch" or "what we are seeing" commentary
+  - Vendor PR or product launches with no headcount / M&A / hiring implication
+  - Generic thought leadership with no named subject
+  - Stories about the industry at large with no specific actor or event
+
+Tie-breakers, in order:
+  1. Story with a named person or company beats anonymous trend
+  2. Story with a specific number beats vague directional claim
+  3. DACH relevance beats global
+  4. Published this week beats older
+
+List:
+{listing}
+
+Reply with ONLY the number of your pick (e.g. "3"). No explanation.
+"""
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = (resp.content[0].text or "").strip()
+        # Extract first integer
+        digits = "".join(c for c in answer if c.isdigit())
+        idx = int(digits) - 1 if digits else 0
+        if 0 <= idx < len(pool):
+            return pool[idx]
+    except Exception as e:
+        log.warning(f"Pick failed ({e}) — defaulting to first item.")
+    return pool[0]
+
+
+# ---------------------------------------------------------------------------
+# STEP 4: Rewrite as a LinkedIn post
+# ---------------------------------------------------------------------------
+def rewrite_for_linkedin(entry: dict, wp_post_url: Optional[str],
+                         client: anthropic.Anthropic) -> Optional[dict]:
+    division_label = DIVISION_LABELS.get(entry["division"], entry["division"])
+    user_message = f"""Published Wolf Jansen post to adapt for LinkedIn:
+
+Division:   {division_label}
+Title:      {entry.get("title","")}
+Excerpt:    {entry.get("excerpt","")}
+
+Full HTML body:
+{entry.get("body","")}
+
+wp_post_url: {wp_post_url or "(no URL available — omit the 'read more' line)"}
+
+Rewrite this as a single Wolf Jansen LinkedIn company-page post following
+every rule in the system prompt. Return JSON only.
+"""
+    try:
+        resp = client.messages.create(
+            model="claude-opus-4-5-20251101",
+            max_tokens=1024,
+            system=LINKEDIN_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.rsplit("```", 1)[0].strip()
+        result = json.loads(raw)
+        # Belt-and-braces: scrub em/en dashes even if the model slipped.
+        # Em dash (—, U+2014) and stray en dashes (–, U+2013) are classic AI tells.
+        if isinstance(result, dict) and result.get("post_text"):
+            result["post_text"] = _scrub_dashes(result["post_text"])
+        return result
+    except Exception as e:
+        log.error(f"LinkedIn rewrite failed: {e}")
+        return None
+
+
+def _scrub_dashes(text: str) -> str:
+    """Replace em dashes with commas and bare en dashes with hyphens."""
+    # Em dash: " — " → ", " (with or without spaces)
+    text = text.replace(" — ", ", ")
+    text = text.replace("—", ",")
+    # En dash: keep inside number ranges like "12-18", otherwise strip
+    # Simple rule: if flanked by digits, convert to hyphen; else to comma
+    import re as _re
+    text = _re.sub(r"(\d)\s*–\s*(\d)", r"\1-\2", text)
+    text = text.replace(" – ", ", ")
+    text = text.replace("–", ",")
+    return text
+
+
+# ---------------------------------------------------------------------------
+# STEP 4b: Generate Flux 2 Pro candidates for the LinkedIn post
+# ---------------------------------------------------------------------------
+# NOTE: Flux 2 responds best to short, photographer-style briefs. The long
+# negative-constraint wrapper we needed for gpt-image-1 actively hurts Flux
+# output — keep this wrapper minimal and trust the model.
+_IMAGE_STYLE_TEMPLATE = (
+    "Documentary editorial photograph. {concept} "
+    "Natural available light, full-frame camera, prime lens, journalistic "
+    "framing. Any person in frame is anonymous (from behind, in profile, "
+    "face obscured, or at a distance). No readable logos or brand names."
+)
+
+
+def _haiku_json_concepts(anthropic_client: anthropic.Anthropic,
+                         user_prompt: str) -> list[str]:
+    """Call Haiku, parse JSON {scenes:[...]}, return list of scene strings."""
+    resp = anthropic_client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=900,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    raw = (resp.content[0].text or "").strip()
+    log.info(f"Haiku raw output:\n{raw}")
+
+    # Strip ```json fences if present
+    stripped = raw
+    if stripped.startswith("```"):
+        # remove first line (``` or ```json) and trailing ```
+        lines = stripped.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines)
+
+    # Find the first {...} JSON object in the string
+    start = stripped.find("{")
+    end   = stripped.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        log.warning("No JSON object in Haiku output.")
+        return []
+
+    blob = stripped[start : end + 1]
+    try:
+        obj = json.loads(blob)
+    except json.JSONDecodeError as e:
+        log.warning(f"Haiku JSON parse failed: {e}")
+        return []
+
+    scenes = obj.get("scenes")
+    if not isinstance(scenes, list):
+        log.warning(f"Haiku JSON missing 'scenes' list: keys={list(obj.keys())}")
+        return []
+
+    cleaned = []
+    for s in scenes:
+        if not isinstance(s, str):
+            continue
+        s = s.strip().strip('"').strip("'")
+        if len(s) > 15:
+            cleaned.append(s[:600])
+    return cleaned
+
+
+def _build_story_concepts(entry: dict, count: int,
+                           anthropic_client: anthropic.Anthropic) -> list[str]:
+    """Ask Claude Haiku for N story-anchored photograph concepts, as JSON."""
+    title   = (entry.get("title", "")   or "")[:200]
+    excerpt = (entry.get("excerpt", "") or "")[:1200]
+
+    primary_prompt = (
+        "You are a photo editor writing briefs for a documentary photographer. "
+        "Read the story and propose " + str(count) + " different photo briefs. "
+        "Each brief is a short scene description the photographer will shoot.\n\n"
+        "TWO-STEP PROCESS:\n"
+        "  STEP 1 — list 5 concrete visual subjects drawn FROM THIS STORY "
+        "that a camera could actually point at. Examples of visual subjects: "
+        "\'a warehouse floor\', \'a packaging line\', \'a container ship\', "
+        "\'a pharmacy counter\', \'a wind turbine base\'. Only subjects that "
+        "fit THIS story.\n"
+        "  STEP 2 — write " + str(count) + " scene briefs, each built around "
+        "a DIFFERENT subject. Keep each brief SHORT (15-30 words, one "
+        "sentence). Pattern: [subject] + [one lighting note] + [one framing "
+        "note] + [one story-specific detail]. Do not pile on adjectives — "
+        "Flux reads short, declarative briefs better than long ones.\n\n"
+        "CRITICAL — if the story is about physical operations (manufacturing, "
+        "logistics, warehousing, retail, robotics, factory automation, "
+        "healthcare ops), the briefs MUST show physical operations, not data "
+        "centres or chips. \'AI\' in a headline does NOT mean photograph a "
+        "chip — read the story body.\n\n"
+        "HARD BANS — never propose:\n"
+        "  - A figure walking into a vanishing point (corridor, server aisle, "
+        "tunnel — any receding-figure perspective shot).\n"
+        "  - A GPU or graphics card isolated on a desk.\n"
+        "  - A silicon wafer under tweezers (unless the story is literally "
+        "about semiconductor fab).\n"
+        "  - A lone server rack glowing blue (unless the story is literally "
+        "about data-centre infrastructure).\n"
+        "  - Hands on keyboard with code overlay, empty boardrooms, city "
+        "skylines, abstract geometric compositions.\n\n"
+        "CONSTRAINTS:\n"
+        "  - Anonymous people only (from behind, in profile, face obscured, "
+        "or at a distance).\n"
+        "  - No readable logos or brand names.\n"
+        "  - Equipment category, not specific named product.\n\n"
+        "WORKED EXAMPLE — Story: \'Maersk diverts around the Red Sea, "
+        "freight rates rise.\' Subjects: container ship, quayside, gantry "
+        "crane, stacked containers, dockworker. 3 briefs: (1) A stacked "
+        "container ship hull seen from water level at dawn, shallow focus on "
+        "the waterline. (2) Two gantry cranes silhouetted against a violet "
+        "dusk sky, empty quayside in the foreground. (3) Stacked containers "
+        "at golden hour from a low angle, a hi-vis dockworker from behind at "
+        "the edge of frame.\n\n"
+        "Now do the same for this story.\n\n"
+        "Story title: " + title + "\n"
+        "Story excerpt: " + excerpt + "\n\n"
+        "OUTPUT FORMAT — return ONLY a single JSON object, no prose, no "
+        "markdown fence, no preamble:\n"
+        '{"nouns": ["...", "...", "...", "...", "..."], '
+        '"scenes": ["brief 1", "brief 2"'
+        + (', "brief 3"' if count >= 3 else "")
+        + (', "brief 4"' if count >= 4 else "")
+        + "]}"
+    )
+
+    concepts = []
+    try:
+        concepts = _haiku_json_concepts(anthropic_client, primary_prompt)
+    except Exception as e:
+        log.warning(f"Haiku concept call failed: {e}")
+
+    if len(concepts) < count:
+        log.warning(f"Haiku returned {len(concepts)} concepts; expected {count}. Retrying simpler.")
+        retry_prompt = (
+            "Write " + str(count) + " short photo briefs for this story. "
+            "Each brief: ONE sentence, 15-25 words, one concrete subject "
+            "drawn from the story, one lighting note, one framing note. "
+            "Anonymous people only. No logos. No corridors with receding "
+            "figures. No isolated GPUs. No wafers. No skylines.\n\n"
+            "Story title: " + title + "\n"
+            "Story excerpt: " + excerpt + "\n\n"
+            "Return ONLY JSON: {\"scenes\": [\"...\", \"...\"" +
+            (", \"...\"" if count >= 3 else "") +
+            (", \"...\"" if count >= 4 else "") +
+            "]}"
+        )
+        try:
+            concepts = _haiku_json_concepts(anthropic_client, retry_prompt)
+        except Exception as e:
+            log.warning(f"Haiku retry failed: {e}")
+
+    return concepts[:count]
+
+
+def _generate_one_image(prompt: str, idx: int) -> Optional[bytes]:
+    """Single Flux 2 Pro call via fal.ai. Returns PNG bytes or None on failure.
+
+    fal.ai returns an image URL (not bytes) — we fetch and return the PNG so
+    the downstream _upload_image_to_repo path stays identical to before.
+    """
+    try:
+        result = fal_client.subscribe(
+            "fal-ai/flux-2-pro",
+            arguments={
+                "prompt":        prompt,
+                "image_size":    "landscape_16_9",   # ~LinkedIn 1.91:1 ratio
+                "num_images":    1,
+                "output_format": "png",
+            },
+            with_logs=False,
+        )
+    except Exception as e:
+        log.error(f"Flux 2 Pro call #{idx} failed at subscribe: {e}")
+        return None
+
+    images = (result or {}).get("images") or []
+    if not images:
+        log.error(f"Flux 2 Pro call #{idx}: no images in response: {result}")
+        return None
+    image_url = images[0].get("url")
+    if not image_url:
+        log.error(f"Flux 2 Pro call #{idx}: first image missing url: {images[0]}")
+        return None
+
+    try:
+        resp = requests.get(image_url, timeout=60)
+    except Exception as e:
+        log.error(f"Flux 2 Pro call #{idx}: image fetch error: {e}")
+        return None
+    if resp.status_code != 200:
+        log.error(f"Flux 2 Pro call #{idx}: image fetch [{resp.status_code}] {resp.text[:200]}")
+        return None
+    return resp.content
+
+
+def _upload_image_to_repo(image_bytes: bytes, filename: str) -> Optional[str]:
+    """Commit PNG to repo/images/<filename> via GitHub Contents API. Returns raw URL."""
+    gh_token = LINKEDIN_CONFIG["github_token"]
+    repo     = LINKEDIN_CONFIG["github_repository"]
+    if not gh_token:
+        log.warning("GITHUB_TOKEN not set, cannot upload image to repo.")
+        return None
+
+    path = f"images/{filename}"
+    api_url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    payload = {
+        "message": f"Add LinkedIn image: {filename}",
+        "content": base64.b64encode(image_bytes).decode(),
+        "branch":  "main",
+    }
+    try:
+        resp = requests.put(
+            api_url,
+            headers={
+                "Authorization": f"Bearer {gh_token}",
+                "Accept":        "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            log.error(f"GitHub upload failed [{resp.status_code}]: {resp.text[:300]}")
+            return None
+    except Exception as e:
+        log.error(f"GitHub upload error: {e}")
+        return None
+
+    # raw.githubusercontent.com serves committed blobs immediately with correct Content-Type.
+    return f"https://raw.githubusercontent.com/{repo}/main/{path}"
+
+
+def generate_image_candidates(entry: dict, token: str,
+                              anthropic_client: anthropic.Anthropic) -> list[str]:
+    """
+    Generate N Flux 2 Pro candidates via fal.ai, commit each to the repo,
+    return public URLs. On any failure, returns fewer than N (or an empty
+    list). The bot keeps going and the approval email falls back to text-only
+    cleanly.
+    """
+    api_key = LINKEDIN_CONFIG["fal_api_key"]
+    count   = max(0, LINKEDIN_CONFIG["image_candidates"])
+    if not api_key or count == 0 or fal_client is None:
+        log.info("fal.ai not configured, skipping image generation.")
+        return []
+
+    # fal_client reads FAL_KEY from env automatically, but set it explicitly
+    # in case a future refactor moves the config to a non-env source.
+    os.environ["FAL_KEY"] = api_key
+
+    concepts = _build_story_concepts(entry, count, anthropic_client)
+    if not concepts:
+        log.warning("No concepts produced, skipping images.")
+        return []
+    for i, c in enumerate(concepts, 1):
+        log.info(f"Concept #{i}: {c}")
+
+    # Generate all candidates in parallel — one distinct concept per call.
+    png_bytes_by_idx: dict[int, bytes] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(concepts)) as pool:
+        futures = {}
+        for i, c in enumerate(concepts, 1):
+            p = _IMAGE_STYLE_TEMPLATE.format(concept=c)
+            futures[pool.submit(_generate_one_image, p, i)] = i
+        for fut in concurrent.futures.as_completed(futures):
+            idx = futures[fut]
+            result = fut.result()
+            if result:
+                png_bytes_by_idx[idx] = result
+
+    if not png_bytes_by_idx:
+        log.warning("All image candidates failed, post will go out text-only.")
+        return []
+
+    # Upload in index order so the 1-2-3 mapping in the email stays stable.
+    today      = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    short_tok  = token.split("-")[0]
+    image_urls: list[str] = []
+    for i in sorted(png_bytes_by_idx.keys()):
+        filename = f"linkedin-{today}-{short_tok}-{i}.png"
+        url = _upload_image_to_repo(png_bytes_by_idx[i], filename)
+        if url:
+            image_urls.append(url)
+            log.info(f"  Uploaded candidate #{i}: {url}")
+
+    return image_urls
+
+
+# ---------------------------------------------------------------------------
+# STEP 5: Register the LinkedIn draft in OneDrive/NewsBot/pending_linkedin.json
+# ---------------------------------------------------------------------------
+def _linkedin_pending_path() -> str:
+    folder = CONFIG.get("onedrive_folder", "").strip()
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, "pending_linkedin.json")
+    return "pending_linkedin.json"
+
+
+def load_linkedin_pending() -> dict:
+    if _running_in_cloud():
+        try:
+            token = _get_graph_token()
+            resp  = requests.get(
+                _onedrive_url("pending_linkedin.json"),
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            log.warning(f"Could not load pending_linkedin from OneDrive: {e}")
+        return {}
+    path = _linkedin_pending_path()
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {}
+
+
+def save_linkedin_pending(data: dict):
+    content = json.dumps(data, indent=2)
+    if _running_in_cloud():
+        try:
+            token = _get_graph_token()
+            resp  = requests.put(
+                _onedrive_url("pending_linkedin.json"),
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json"},
+                data=content.encode(),
+                timeout=15,
+            )
+            resp.raise_for_status()
+            log.info("  LinkedIn draft saved to OneDrive/NewsBot/pending_linkedin.json")
+        except Exception as e:
+            log.error(f"Failed to save pending_linkedin to OneDrive: {e}")
+        return
+    path = _linkedin_pending_path()
+    with open(path, "w") as f:
+        f.write(content)
+    log.info(f"  LinkedIn draft saved to: {path}")
+
+
+def register_linkedin_draft(token: str, source_token: str, entry: dict,
+                            post_text: str, wp_post_url: Optional[str],
+                            image_urls: Optional[list[str]] = None):
+    pending = load_linkedin_pending()
+    pending[token] = {
+        "post_text":      post_text,
+        "source_token":   source_token,
+        "source_title":   entry.get("title", ""),
+        "source_excerpt": entry.get("excerpt", ""),
+        "division":       entry["division"],
+        "wp_post_url":    wp_post_url or "",
+        "image_urls":     image_urls or [],   # [] = no images, post as text-only
+        "used":           False,
+        "created":        datetime.now(timezone.utc).isoformat(),
+    }
+    save_linkedin_pending(pending)
+
+
+# ---------------------------------------------------------------------------
+# STEP 6: Email preview — approve / reject buttons
+# ---------------------------------------------------------------------------
+def _pages_url(action: str, pa_url: str, token: str) -> str:
+    encoded = base64.b64encode(pa_url.encode()).decode()
+    return f"{_GITHUB_PAGES_BASE}/{action}.html?url={encoded}&token={token}"
+
+
+def _pages_url_approve_image(pa_url: str, token: str, image_choice: str) -> str:
+    """
+    Approval URL that carries the chosen image index (or 'none' for text-only).
+    The image choice is appended to the PA URL BEFORE base64-encoding, so the
+    existing approve-linkedin.html redirector passes it through untouched when
+    it appends '&token=...'.
+    """
+    # PA URLs already carry query params (?api-version=...&sig=...), so &image= is safe.
+    pa_with_image = f"{pa_url}&image={image_choice}"
+    encoded = base64.b64encode(pa_with_image.encode()).decode()
+    return f"{_GITHUB_PAGES_BASE}/approve-linkedin.html?url={encoded}&token={token}"
+
+
+def _image_thumbnails_row_html(token: str, image_urls: list[str]) -> str:
+    """
+    One image per row at full card width so you can actually evaluate it for
+    AI artefacts before committing. Clicking the image opens the raw PNG in a
+    new tab (no approval); the blue button below approves with that image.
+    """
+    if not image_urls:
+        return ""
+
+    pa_url = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
+    rows = []
+    for i, img_url in enumerate(image_urls, start=1):
+        approve_url = _pages_url_approve_image(pa_url, token, str(i))
+        rows.append(f"""
+      <tr><td style="padding:0 0 22px;">
+        <a href="{img_url}" target="_blank" rel="noopener"
+           style="display:block;text-decoration:none;">
+          <img src="{img_url}" alt="Option {i}"
+               style="display:block;width:100%;max-width:100%;height:auto;
+                      border-radius:6px;border:1px solid #e0e0e0;">
+        </a>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;">
+          <tr>
+            <td align="left" style="font-size:12px;color:#888;">
+              Option {i} ·
+              <a href="{img_url}" target="_blank" rel="noopener"
+                 style="color:#0A66C2;text-decoration:underline;">view full size</a>
+            </td>
+            <td align="right">
+              <a href="{approve_url}"
+                 style="display:inline-block;padding:9px 18px;background:#0A66C2;
+                        color:#fff;font-size:13px;font-weight:700;text-decoration:none;
+                        border-radius:4px;letter-spacing:0.02em;">
+                ✓ Post with image {i}
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td></tr>""")
+
+    return f"""
+    <p style="margin:0 0 14px;font-size:13px;color:#666;font-weight:600;">
+      Pick an image (click the image to view full size, or use the blue button
+      to post):
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+      {''.join(rows)}
+    </table>"""
+def _linkedin_card_html(token: str, post_text: str, entry: dict,
+                         wp_post_url: Optional[str],
+                         image_urls: Optional[list[str]] = None) -> str:
+    pa_approve = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
+    # "Text-only" approve link: encodes image=none so the PA flow skips the image step.
+    approve_text_only_url = _pages_url_approve_image(pa_approve, token, "none")
+    reject_url = _pages_url("reject-linkedin", LINKEDIN_CONFIG["pa_linkedin_reject_url"], token)
+
+    colour = DIVISION_COLOURS.get(entry["division"], "#0A66C2")
+    label  = DIVISION_LABELS.get(entry["division"], entry["division"])
+
+    # Convert \n\n to <br><br> for HTML preview. Escape basic HTML chars in post.
+    safe = (post_text.replace("&", "&amp;")
+                     .replace("<", "&lt;")
+                     .replace(">", "&gt;"))
+    html_preview = safe.replace("\n\n", "<br><br>").replace("\n", "<br>")
+
+    source_line = (
+        f'<p style="margin:12px 0 0;font-size:12px;color:#888;">'
+        f'Source: <a href="{wp_post_url}" style="color:#888;">{wp_post_url}</a></p>'
+    ) if wp_post_url else ""
+
+    image_row = _image_thumbnails_row_html(token, image_urls or [])
+    # If we have images, the primary action = pick-an-image; the text-only button
+    # is a secondary choice. If image generation failed, fall back to the original
+    # single "Approve" button which still encodes image=none.
+    if image_urls:
+        action_buttons = f"""
+    <table cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding-right:12px;">
+          <a href="{approve_text_only_url}"
+             style="display:inline-block;padding:10px 22px;background:#f5f5f5;
+                    color:#444;font-size:13px;font-weight:600;text-decoration:none;
+                    border-radius:5px;border:1px solid #ddd;">Post as text only</a>
+        </td>
+        <td>
+          <a href="{reject_url}"
+             style="display:inline-block;padding:10px 22px;background:#fff;
+                    color:#999;font-size:13px;font-weight:600;text-decoration:none;
+                    border-radius:5px;border:1px solid #ddd;">✗ Reject everything</a>
+        </td>
+      </tr>
+    </table>"""
+    else:
+        action_buttons = f"""
+    <table cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding-right:12px;">
+          <a href="{approve_text_only_url}"
+             style="display:inline-block;padding:11px 28px;background:#0A66C2;
+                    color:#fff;font-size:14px;font-weight:700;text-decoration:none;
+                    border-radius:5px;letter-spacing:0.02em;">✓ Approve &amp; Post to LinkedIn</a>
+        </td>
+        <td>
+          <a href="{reject_url}"
+             style="display:inline-block;padding:11px 24px;background:#f5f5f5;
+                    color:#666;font-size:14px;font-weight:600;text-decoration:none;
+                    border-radius:5px;border:1px solid #ddd;">✗ Reject</a>
+        </td>
+      </tr>
+    </table>"""
+
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="margin-bottom:28px;border:1px solid #e0e0e0;border-radius:8px;
+              border-left:4px solid {colour};background:#fff;">
+  <tr><td style="padding:24px 28px;">
+    <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.08em;
+              text-transform:uppercase;color:{colour};">LinkedIn · {label}</p>
+    <p style="margin:0 0 14px;font-size:13px;color:#666;">
+      Based on: <em>{entry.get("title","")}</em>
+    </p>
+    <hr style="border:none;border-top:1px solid #eee;margin:0 0 16px;">
+
+    <!-- LinkedIn-style preview -->
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="background:#f3f6f8;border-radius:6px;">
+      <tr><td style="padding:18px 20px;">
+        <table cellpadding="0" cellspacing="0">
+          <tr>
+            <td width="40" style="vertical-align:top;">
+              <div style="width:40px;height:40px;border-radius:50%;background:#111;
+                          color:#fff;text-align:center;line-height:40px;
+                          font-weight:700;font-size:15px;">WJ</div>
+            </td>
+            <td style="padding-left:12px;vertical-align:top;">
+              <p style="margin:0;font-size:14px;font-weight:700;color:#111;">Wolf Jansen</p>
+              <p style="margin:1px 0 0;font-size:12px;color:#666;">
+                Specialist recruitment · DACH · 7,875 followers
+              </p>
+            </td>
+          </tr>
+        </table>
+        <div style="margin-top:14px;font-size:14px;color:#111;line-height:1.55;
+                    white-space:pre-wrap;">{html_preview}</div>
+        {source_line}
+      </td></tr>
+    </table>
+
+    <hr style="border:none;border-top:1px solid #eee;margin:20px 0 20px;">
+
+    {image_row}
+
+    {action_buttons}
+  </td></tr>
+</table>"""
+
+
+def send_linkedin_approval_email(token: str, post_text: str, entry: dict,
+                                  wp_post_url: Optional[str],
+                                  image_urls: Optional[list[str]] = None):
+    smtp_user = CONFIG["smtp_user"]
+    smtp_pass = CONFIG["smtp_password"]
+    if not (smtp_user and smtp_pass):
+        log.warning("SMTP credentials not set, skipping LinkedIn email.")
+        return
+    if not (LINKEDIN_CONFIG["pa_linkedin_approve_url"] and LINKEDIN_CONFIG["pa_linkedin_reject_url"]):
+        log.warning("PA LinkedIn URLs not set, skipping LinkedIn email.")
+        return
+
+    date_str   = datetime.now(timezone.utc).strftime("%d %B %Y")
+    subject    = f"Wolf Jansen LinkedIn draft ready for review, {date_str}"
+    recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
+
+    card = _linkedin_card_html(token, post_text, entry, wp_post_url, image_urls)
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f0f0;
+             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;padding:32px 16px;">
+  <tr><td align="center">
+    <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
+      <tr><td style="background:#111;border-radius:8px 8px 0 0;padding:24px 32px;">
+        <p style="margin:0;font-size:20px;font-weight:700;color:#fff;">Wolf Jansen</p>
+        <p style="margin:4px 0 0;font-size:13px;color:#aaa;">LinkedIn Bot — Weekly · {date_str}</p>
+      </td></tr>
+      <tr><td style="background:#fff;padding:24px 32px 12px;">
+        <p style="margin:0;font-size:15px;color:#333;line-height:1.6;">
+          Draft LinkedIn post ready. Preview below — click
+          <strong>Approve &amp; Post to LinkedIn</strong> to publish immediately
+          to the company page, or <strong>Reject</strong> to discard.
+        </p>
+      </td></tr>
+      <tr><td style="background:#fff;padding:12px 32px 28px;">{card}</td></tr>
+      <tr><td style="background:#f8f8f8;border-top:1px solid #e8e8e8;
+                     border-radius:0 0 8px 8px;padding:16px 32px;">
+        <p style="margin:0;font-size:12px;color:#999;line-height:1.5;">
+          Generated automatically by the Wolf Jansen LinkedIn Bot.<br>
+          Approval triggers Make.com → LinkedIn Pages. Single-use link.
+        </p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table></body></html>"""
+
+    pa_approve = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
+    text_only_url = _pages_url_approve_image(pa_approve, token, "none")
+    reject_link   = _pages_url("reject-linkedin", LINKEDIN_CONFIG["pa_linkedin_reject_url"], token)
+
+    plain_lines = [
+        "Wolf Jansen LinkedIn draft",
+        "",
+        f"Based on: {entry.get('title','')}",
+        "",
+        post_text,
+        "",
+    ]
+    if image_urls:
+        for i, img_url in enumerate(image_urls, start=1):
+            link = _pages_url_approve_image(pa_approve, token, str(i))
+            plain_lines.append(f"Post with image {i}: {link}")
+            plain_lines.append(f"  preview: {img_url}")
+        plain_lines.append(f"Post as text only: {text_only_url}")
+    else:
+        plain_lines.append(f"Approve: {text_only_url}")
+    plain_lines.append(f"Reject:  {reject_link}")
+    plain = "\n".join(plain_lines) + "\n"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = CONFIG["email_from"]
+    msg["To"]      = ", ".join(recipients)
+    msg.attach(MIMEText(plain, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(CONFIG["smtp_host"], CONFIG["smtp_port"]) as server:
+            server.ehlo(); server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, recipients, msg.as_string())
+        log.info(f"✉  LinkedIn approval email sent to {', '.join(recipients)}")
+    except Exception as e:
+        log.error(f"Failed to send LinkedIn email: {e}")
+
+
+def send_no_linkedin_email():
+    smtp_user = CONFIG["smtp_user"]
+    smtp_pass = CONFIG["smtp_password"]
+    if not (smtp_user and smtp_pass):
+        return
+    date_str   = datetime.now(timezone.utc).strftime("%d %B %Y")
+    subject    = f"Wolf Jansen LinkedIn Bot — no candidates this week ({date_str})"
+    recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
+    html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:32px;background:#f0f0f0;
+             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:8px;
+              padding:32px;text-align:center;">
+    <h2 style="color:#1a1a1a;margin:0 0 12px;">No LinkedIn post this week</h2>
+    <p style="color:#555;font-size:15px;line-height:1.6;margin:0;">
+      No approved + published posts in the last {LINKEDIN_CONFIG["lookback_days"]} days,
+      or they've all already been shared on LinkedIn.
+    </p>
+  </div>
+</body></html>"""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = CONFIG["email_from"]
+    msg["To"]      = ", ".join(recipients)
+    msg.attach(MIMEText(subject, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+    try:
+        with smtplib.SMTP(CONFIG["smtp_host"], CONFIG["smtp_port"]) as server:
+            server.ehlo(); server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, recipients, msg.as_string())
+        log.info(f"✉  No-candidates notification sent to {', '.join(recipients)}")
+    except Exception as e:
+        log.error(f"Failed to send no-candidates email: {e}")
+
+
+# ---------------------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------------------
+def main():
+    log.info("=" * 60)
+    log.info(f"Wolf Jansen LinkedIn Bot — "
+             f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    log.info("=" * 60)
+
+    pool = candidate_pool()
+    if not pool:
+        send_no_linkedin_email()
+        return
+
+    ai_client = anthropic.Anthropic(api_key=CONFIG["anthropic_api_key"])
+
+    pick = pick_best(pool, ai_client)
+    if not pick:
+        send_no_linkedin_email()
+        return
+    log.info(f"Picked: [{pick['division']}] {pick.get('title','')[:80]}")
+
+    wp_url = resolve_wp_url(pick)
+    if wp_url:
+        log.info(f"WP URL: {wp_url}")
+    else:
+        log.info("WP URL not found — post will end without a 'read more' line.")
+
+    rewritten = rewrite_for_linkedin(pick, wp_url, ai_client)
+    if not rewritten or not rewritten.get("post_text"):
+        log.error("Rewrite produced no usable post.")
+        send_no_linkedin_email()
+        return
+
+    token = str(uuid.uuid4())
+
+    # Generate image candidates. Returns [] if fal.ai/GitHub not configured or
+    # on any failure, in which case the approval email shows a single text-only
+    # approve button (same behaviour as before images were added).
+    image_urls = generate_image_candidates(pick, token, ai_client)
+    log.info(f"Image candidates: {len(image_urls)} uploaded")
+
+    register_linkedin_draft(
+        token        = token,
+        source_token = pick["token"],
+        entry        = pick,
+        post_text    = rewritten["post_text"],
+        wp_post_url  = wp_url,
+        image_urls   = image_urls,
+    )
+    send_linkedin_approval_email(token, rewritten["post_text"], pick, wp_url, image_urls)
+
+    log.info("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
