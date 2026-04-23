@@ -500,21 +500,26 @@ def _scrub_dashes(text: str) -> str:
 # STEP 4b: Generate DALL-E image candidates for the LinkedIn post
 # ---------------------------------------------------------------------------
 _IMAGE_STYLE_TEMPLATE = (
-    "Editorial photography in the style of a serious business publication "
-    "(Financial Times, The Economist, Bloomberg Businessweek). Cinematic "
-    "lighting, shallow depth of field, clear real-world subject matter with "
-    "a tangible physical scene. Cool colour grading: deep navy (#132147), "
-    "charcoal, and muted off-white tones. Matte texture, restrained composition, "
-    "serious tone. "
+    "Contemporary editorial news photography, 2024 style, sharp digital capture. "
+    "References: Reuters Pictures, NYT Picture Desk, Bloomberg online photography, "
+    "current Wall Street Journal visuals. Natural light where possible, clean "
+    "and accurate colour reproduction, crisp detail, realistic proportions and "
+    "scale. Medium-wide framing equivalent to a 35mm or 50mm lens on a full-frame "
+    "camera. Subtle depth of field — subject sharp, background softly defocused. "
     "Photograph this specific scene: {concept}. "
-   "Strict rules: no people, no faces, no hands, no body parts, no silhouettes, "
+    "Strict rules: no people, no faces, no hands, no body parts, no silhouettes, "
     "no crowds. No visible text, no letters, no words, no logos, no brand names, "
     "no company signage, no typography, no readable signs, no legible numbers, "
     "no charts or graphs with labels. Show only generic category equipment — "
     "no trademarked machine designs or identifiable branded products. "
-    "The image must depict a real physical place or objects. Do NOT produce "
-    "abstract geometric patterns, floating shapes, minimalist 3D renders, or "
-    "stock-image-style backgrounds."
+    "Accurate real-world proportions and scale: every object must be sized "
+    "correctly relative to the others and to the environment. "
+    "The image must depict a real physical place or objects as they exist today. "
+    "Do NOT produce abstract geometric patterns, floating shapes, minimalist 3D "
+    "renders, stock-image-style backgrounds, sepia or yellow tones, heavy film "
+    "grain, or any vintage / retro aesthetic. The photograph should look like "
+    "it was taken this week with a modern digital camera, not pulled from an "
+    "old magazine archive."
 )
 
 
@@ -610,7 +615,7 @@ def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]
             prompt=prompt,
             n=1,                    # DALL-E 3 only supports n=1 per call
             size="1792x1024",       # landscape — closest to LinkedIn 1200x627
-            quality="standard",     # $0.040/image (hd is $0.080)
+            quality="hd",           # $0.080/image — cleaner proportions + detail
             response_format="b64_json",
             style="natural",        # less hyper-saturated than "vivid"
         )
