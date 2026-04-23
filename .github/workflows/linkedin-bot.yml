@@ -5,6 +5,9 @@ on:
     - cron: '0 7 * * 4'   # Thursdays 07:00 UTC = 09:00 CEST (summer) / 08:00 CET (winter)
   workflow_dispatch:        # Allow manual "Run workflow" from GitHub UI
 
+permissions:
+  contents: write    # Required to commit generated images back to the repo
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -19,11 +22,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install feedparser anthropic requests python-dotenv
+        run: pip install feedparser anthropic requests python-dotenv openai
 
       - name: Run LinkedIn bot
         env:
           ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY:           ${{ secrets.OPENAI_API_KEY }}
           SMTP_HOST:                smtp.gmail.com
           SMTP_PORT:                "587"
           SMTP_USER:                ${{ secrets.SMTP_USER }}
@@ -43,4 +47,7 @@ jobs:
           PA_LINKEDIN_APPROVE_URL:  ${{ secrets.PA_LINKEDIN_APPROVE_URL }}
           PA_LINKEDIN_REJECT_URL:   ${{ secrets.PA_LINKEDIN_REJECT_URL }}
           LINKEDIN_LOOKBACK_DAYS:   "7"
+          # Auto-injected by Actions; used to commit images via Contents API
+          GITHUB_TOKEN:             ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY:        ${{ github.repository }}
         run: python linkedin_bot.py
