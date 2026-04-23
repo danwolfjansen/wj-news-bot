@@ -478,7 +478,7 @@ def _scrub_dashes(text: str) -> str:
 # ---------------------------------------------------------------------------
 # STEP 4b: Generate DALL-E image candidates for the LinkedIn post
 # ---------------------------------------------------------------------------
-_IMAGE_STYLE_TEMPLATE = (
+   _IMAGE_STYLE_TEMPLATE = (
     "Editorial photography in the style of a serious business publication "
     "(Financial Times, The Economist, Bloomberg Businessweek). Cinematic "
     "lighting, shallow depth of field, clear real-world subject matter with "
@@ -753,38 +753,53 @@ def _pages_url_approve_image(pa_url: str, token: str, image_choice: str) -> str:
 
 
 def _image_thumbnails_row_html(token: str, image_urls: list[str]) -> str:
-    """Three thumbnails, each a clickable approve button for that image."""
+    """
+    One image per row at full card width so you can actually evaluate it for
+    AI artefacts before committing. Clicking the image opens the raw PNG in a
+    new tab (no approval); the blue button below approves with that image.
+    """
     if not image_urls:
         return ""
 
     pa_url = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
-    cells = []
+    rows = []
     for i, img_url in enumerate(image_urls, start=1):
         approve_url = _pages_url_approve_image(pa_url, token, str(i))
-        cells.append(f"""
-        <td width="33%" align="center" style="padding:0 6px;">
-          <a href="{approve_url}" style="text-decoration:none;color:inherit;">
-            <img src="{img_url}" alt="Option {i}"
-                 style="display:block;width:100%;max-width:180px;height:auto;
-                        border-radius:6px;border:2px solid #e0e0e0;">
-            <div style="margin-top:8px;padding:8px 10px;background:#0A66C2;color:#fff;
-                        font-size:12px;font-weight:700;border-radius:4px;
-                        letter-spacing:0.02em;">✓ Post with image {i}</div>
-          </a>
-        </td>""")
-    # Pad to 3 columns so the row stays aligned even if 1 or 2 generations failed.
-    while len(cells) < 3:
-        cells.append('<td width="33%" style="padding:0 6px;"></td>')
+        rows.append(f"""
+      <tr><td style="padding:0 0 22px;">
+        <a href="{img_url}" target="_blank" rel="noopener"
+           style="display:block;text-decoration:none;">
+          <img src="{img_url}" alt="Option {i}"
+               style="display:block;width:100%;max-width:100%;height:auto;
+                      border-radius:6px;border:1px solid #e0e0e0;">
+        </a>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;">
+          <tr>
+            <td align="left" style="font-size:12px;color:#888;">
+              Option {i} ·
+              <a href="{img_url}" target="_blank" rel="noopener"
+                 style="color:#0A66C2;text-decoration:underline;">view full size</a>
+            </td>
+            <td align="right">
+              <a href="{approve_url}"
+                 style="display:inline-block;padding:9px 18px;background:#0A66C2;
+                        color:#fff;font-size:13px;font-weight:700;text-decoration:none;
+                        border-radius:4px;letter-spacing:0.02em;">
+                ✓ Post with image {i}
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td></tr>""")
 
     return f"""
-    <p style="margin:0 0 10px;font-size:13px;color:#666;font-weight:600;">
-      Pick an image:
+    <p style="margin:0 0 14px;font-size:13px;color:#666;font-weight:600;">
+      Pick an image (click the image to view full size, or use the blue button
+      to post):
     </p>
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;">
-      <tr>{''.join(cells)}</tr>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+      {''.join(rows)}
     </table>"""
-
-
 def _linkedin_card_html(token: str, post_text: str, entry: dict,
                          wp_post_url: Optional[str],
                          image_urls: Optional[list[str]] = None) -> str:
