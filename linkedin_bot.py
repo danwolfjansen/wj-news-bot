@@ -18,6 +18,7 @@ LinkedIn pool:  OneDrive/NewsBot/pending_linkedin.json   (new file this bot writ
 
 import anthropic
 import base64
+import concurrent.futures
 import json
 import logging
 import os
@@ -28,6 +29,11 @@ from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None  # type: ignore  # image generation will be skipped if not installed
 
 # Reuse helpers / config from the existing news bot so we stay DRY.
 # (news_bot.py lives next to this file — same repo root.)
@@ -64,6 +70,14 @@ LINKEDIN_CONFIG = {
 
     # How far back to look for candidate stories (days).
     "lookback_days": int(os.getenv("LINKEDIN_LOOKBACK_DAYS", "7")),
+
+    # OpenAI for DALL-E 3 image candidates.
+    "openai_api_key":   os.getenv("OPENAI_API_KEY", ""),
+    # GitHub API for uploading generated images back to the repo.
+    "github_token":     os.getenv("GITHUB_TOKEN", ""),
+    "github_repository": os.getenv("GITHUB_REPOSITORY", "danwolfjansen/wj-news-bot"),
+    # How many image candidates to generate per post.
+    "image_candidates": int(os.getenv("LINKEDIN_IMAGE_CANDIDATES", "3")),
 }
 
 _GITHUB_PAGES_BASE = "https://danwolfjansen.github.io/wj-news-bot"
@@ -380,6 +394,157 @@ def _scrub_dashes(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# STEP 4b: Generate DALL-E image candidates for the LinkedIn post
+# ---------------------------------------------------------------------------
+_IMAGE_STYLE_TEMPLATE = (
+    "Abstract editorial photography. Minimalist composition with geometric "
+    "shapes and soft natural lighting. Deep navy blue (#132147) and muted "
+    "white palette, matte textures, subtle gradients. Shallow depth of field, "
+    "cinematic framing. No people, no faces, no hands, no bodies, no text, "
+    "no letters, no logos, no typography, no signs, no numbers. Clean, "
+    "understated, corporate. Subtle conceptual representation of: {concept}. "
+    "Professional visual for a senior-executive LinkedIn audience."
+)
+
+
+def _build_story_concept(entry: dict, anthropic_client: anthropic.Anthropic) -> str:
+    """Ask Claude Haiku to distil the story into a short visual concept."""
+    title   = (entry.get("title", "")   or "")[:200]
+    excerpt = (entry.get("excerpt", "") or "")[:600]
+    prompt = (
+        "Distil the story below into a SHORT visual concept phrase (6-12 words) "
+        "suitable for an abstract editorial photograph. Describe subject matter "
+        "and mood only, no style words, no colour words, no 'photo of' / 'image of', "
+        "no people, no text. Just the concept.\n\n"
+        f"Title: {title}\nExcerpt: {excerpt}\n\n"
+        "Return ONLY the concept phrase, no quotes, no prefix."
+    )
+    try:
+        resp = anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=60,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        concept = (resp.content[0].text or "").strip().strip('"').strip("'")
+        if concept:
+            return concept[:200]
+    except Exception as e:
+        log.warning(f"Concept distillation failed: {e}")
+    # Fallback: strip the title of obvious noise and use it directly.
+    return title[:120] or "business transformation and talent movement"
+
+
+def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]:
+    """Single DALL-E 3 call. Returns PNG bytes or None on failure."""
+    try:
+        resp = openai_client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            n=1,                    # DALL-E 3 only supports n=1 per call
+            size="1792x1024",       # landscape — closest to LinkedIn 1200x627
+            quality="standard",     # $0.040/image (hd is $0.080)
+            response_format="b64_json",
+            style="natural",        # less hyper-saturated than "vivid"
+        )
+        b64 = resp.data[0].b64_json
+        return base64.b64decode(b64)
+    except Exception as e:
+        log.error(f"DALL-E image #{idx} failed: {e}")
+        return None
+
+
+def _upload_image_to_repo(image_bytes: bytes, filename: str) -> Optional[str]:
+    """Commit PNG to repo/images/<filename> via GitHub Contents API. Returns raw URL."""
+    gh_token = LINKEDIN_CONFIG["github_token"]
+    repo     = LINKEDIN_CONFIG["github_repository"]
+    if not gh_token:
+        log.warning("GITHUB_TOKEN not set, cannot upload image to repo.")
+        return None
+
+    path = f"images/{filename}"
+    api_url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    payload = {
+        "message": f"Add LinkedIn image: {filename}",
+        "content": base64.b64encode(image_bytes).decode(),
+        "branch":  "main",
+    }
+    try:
+        resp = requests.put(
+            api_url,
+            headers={
+                "Authorization": f"Bearer {gh_token}",
+                "Accept":        "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            log.error(f"GitHub upload failed [{resp.status_code}]: {resp.text[:300]}")
+            return None
+    except Exception as e:
+        log.error(f"GitHub upload error: {e}")
+        return None
+
+    # raw.githubusercontent.com serves committed blobs immediately with correct Content-Type.
+    return f"https://raw.githubusercontent.com/{repo}/main/{path}"
+
+
+def generate_image_candidates(entry: dict, token: str,
+                              anthropic_client: anthropic.Anthropic) -> list[str]:
+    """
+    Generate N DALL-E image candidates, commit each to the repo, return public URLs.
+    On any failure, returns fewer than N (or an empty list). The bot keeps going
+    and the approval email falls back to text-only cleanly.
+    """
+    api_key = LINKEDIN_CONFIG["openai_api_key"]
+    count   = max(0, LINKEDIN_CONFIG["image_candidates"])
+    if not api_key or count == 0 or OpenAI is None:
+        log.info("OpenAI not configured, skipping image generation.")
+        return []
+
+    concept = _build_story_concept(entry, anthropic_client)
+    prompt  = _IMAGE_STYLE_TEMPLATE.format(concept=concept)
+    log.info(f"Image concept: {concept}")
+
+    try:
+        openai_client = OpenAI(api_key=api_key)
+    except Exception as e:
+        log.error(f"OpenAI client init failed: {e}")
+        return []
+
+    # Generate all candidates in parallel to keep runtime down (each call ~15-30s).
+    png_bytes_by_idx: dict[int, bytes] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
+        futures = {
+            pool.submit(_generate_one_image, openai_client, prompt, i + 1): i + 1
+            for i in range(count)
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            idx = futures[fut]
+            result = fut.result()
+            if result:
+                png_bytes_by_idx[idx] = result
+
+    if not png_bytes_by_idx:
+        log.warning("All image candidates failed, post will go out text-only.")
+        return []
+
+    # Upload in index order so the 1-2-3 mapping in the email stays stable.
+    today      = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    short_tok  = token.split("-")[0]
+    image_urls: list[str] = []
+    for i in sorted(png_bytes_by_idx.keys()):
+        filename = f"linkedin-{today}-{short_tok}-{i}.png"
+        url = _upload_image_to_repo(png_bytes_by_idx[i], filename)
+        if url:
+            image_urls.append(url)
+            log.info(f"  Uploaded candidate #{i}: {url}")
+
+    return image_urls
+
+
+# ---------------------------------------------------------------------------
 # STEP 5: Register the LinkedIn draft in OneDrive/NewsBot/pending_linkedin.json
 # ---------------------------------------------------------------------------
 def _linkedin_pending_path() -> str:
@@ -435,7 +600,8 @@ def save_linkedin_pending(data: dict):
 
 
 def register_linkedin_draft(token: str, source_token: str, entry: dict,
-                            post_text: str, wp_post_url: Optional[str]):
+                            post_text: str, wp_post_url: Optional[str],
+                            image_urls: Optional[list[str]] = None):
     pending = load_linkedin_pending()
     pending[token] = {
         "post_text":      post_text,
@@ -444,6 +610,7 @@ def register_linkedin_draft(token: str, source_token: str, entry: dict,
         "source_excerpt": entry.get("excerpt", ""),
         "division":       entry["division"],
         "wp_post_url":    wp_post_url or "",
+        "image_urls":     image_urls or [],   # [] = no images, post as text-only
         "used":           False,
         "created":        datetime.now(timezone.utc).isoformat(),
     }
@@ -458,10 +625,59 @@ def _pages_url(action: str, pa_url: str, token: str) -> str:
     return f"{_GITHUB_PAGES_BASE}/{action}.html?url={encoded}&token={token}"
 
 
+def _pages_url_approve_image(pa_url: str, token: str, image_choice: str) -> str:
+    """
+    Approval URL that carries the chosen image index (or 'none' for text-only).
+    The image choice is appended to the PA URL BEFORE base64-encoding, so the
+    existing approve-linkedin.html redirector passes it through untouched when
+    it appends '&token=...'.
+    """
+    # PA URLs already carry query params (?api-version=...&sig=...), so &image= is safe.
+    pa_with_image = f"{pa_url}&image={image_choice}"
+    encoded = base64.b64encode(pa_with_image.encode()).decode()
+    return f"{_GITHUB_PAGES_BASE}/approve-linkedin.html?url={encoded}&token={token}"
+
+
+def _image_thumbnails_row_html(token: str, image_urls: list[str]) -> str:
+    """Three thumbnails, each a clickable approve button for that image."""
+    if not image_urls:
+        return ""
+
+    pa_url = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
+    cells = []
+    for i, img_url in enumerate(image_urls, start=1):
+        approve_url = _pages_url_approve_image(pa_url, token, str(i))
+        cells.append(f"""
+        <td width="33%" align="center" style="padding:0 6px;">
+          <a href="{approve_url}" style="text-decoration:none;color:inherit;">
+            <img src="{img_url}" alt="Option {i}"
+                 style="display:block;width:100%;max-width:180px;height:auto;
+                        border-radius:6px;border:2px solid #e0e0e0;">
+            <div style="margin-top:8px;padding:8px 10px;background:#0A66C2;color:#fff;
+                        font-size:12px;font-weight:700;border-radius:4px;
+                        letter-spacing:0.02em;">✓ Post with image {i}</div>
+          </a>
+        </td>""")
+    # Pad to 3 columns so the row stays aligned even if 1 or 2 generations failed.
+    while len(cells) < 3:
+        cells.append('<td width="33%" style="padding:0 6px;"></td>')
+
+    return f"""
+    <p style="margin:0 0 10px;font-size:13px;color:#666;font-weight:600;">
+      Pick an image:
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;">
+      <tr>{''.join(cells)}</tr>
+    </table>"""
+
+
 def _linkedin_card_html(token: str, post_text: str, entry: dict,
-                         wp_post_url: Optional[str]) -> str:
-    approve_url = _pages_url("approve-linkedin", LINKEDIN_CONFIG["pa_linkedin_approve_url"], token)
-    reject_url  = _pages_url("reject-linkedin",  LINKEDIN_CONFIG["pa_linkedin_reject_url"],  token)
+                         wp_post_url: Optional[str],
+                         image_urls: Optional[list[str]] = None) -> str:
+    pa_approve = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
+    # "Text-only" approve link: encodes image=none so the PA flow skips the image step.
+    approve_text_only_url = _pages_url_approve_image(pa_approve, token, "none")
+    reject_url = _pages_url("reject-linkedin", LINKEDIN_CONFIG["pa_linkedin_reject_url"], token)
 
     colour = DIVISION_COLOURS.get(entry["division"], "#0A66C2")
     label  = DIVISION_LABELS.get(entry["division"], entry["division"])
@@ -476,6 +692,47 @@ def _linkedin_card_html(token: str, post_text: str, entry: dict,
         f'<p style="margin:12px 0 0;font-size:12px;color:#888;">'
         f'Source: <a href="{wp_post_url}" style="color:#888;">{wp_post_url}</a></p>'
     ) if wp_post_url else ""
+
+    image_row = _image_thumbnails_row_html(token, image_urls or [])
+    # If we have images, the primary action = pick-an-image; the text-only button
+    # is a secondary choice. If image generation failed, fall back to the original
+    # single "Approve" button which still encodes image=none.
+    if image_urls:
+        action_buttons = f"""
+    <table cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding-right:12px;">
+          <a href="{approve_text_only_url}"
+             style="display:inline-block;padding:10px 22px;background:#f5f5f5;
+                    color:#444;font-size:13px;font-weight:600;text-decoration:none;
+                    border-radius:5px;border:1px solid #ddd;">Post as text only</a>
+        </td>
+        <td>
+          <a href="{reject_url}"
+             style="display:inline-block;padding:10px 22px;background:#fff;
+                    color:#999;font-size:13px;font-weight:600;text-decoration:none;
+                    border-radius:5px;border:1px solid #ddd;">✗ Reject everything</a>
+        </td>
+      </tr>
+    </table>"""
+    else:
+        action_buttons = f"""
+    <table cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="padding-right:12px;">
+          <a href="{approve_text_only_url}"
+             style="display:inline-block;padding:11px 28px;background:#0A66C2;
+                    color:#fff;font-size:14px;font-weight:700;text-decoration:none;
+                    border-radius:5px;letter-spacing:0.02em;">✓ Approve &amp; Post to LinkedIn</a>
+        </td>
+        <td>
+          <a href="{reject_url}"
+             style="display:inline-block;padding:11px 24px;background:#f5f5f5;
+                    color:#666;font-size:14px;font-weight:600;text-decoration:none;
+                    border-radius:5px;border:1px solid #ddd;">✗ Reject</a>
+        </td>
+      </tr>
+    </table>"""
 
     return f"""
 <table width="100%" cellpadding="0" cellspacing="0"
@@ -516,42 +773,30 @@ def _linkedin_card_html(token: str, post_text: str, entry: dict,
 
     <hr style="border:none;border-top:1px solid #eee;margin:20px 0 20px;">
 
-    <table cellpadding="0" cellspacing="0">
-      <tr>
-        <td style="padding-right:12px;">
-          <a href="{approve_url}"
-             style="display:inline-block;padding:11px 28px;background:#0A66C2;
-                    color:#fff;font-size:14px;font-weight:700;text-decoration:none;
-                    border-radius:5px;letter-spacing:0.02em;">✓ Approve &amp; Post to LinkedIn</a>
-        </td>
-        <td>
-          <a href="{reject_url}"
-             style="display:inline-block;padding:11px 24px;background:#f5f5f5;
-                    color:#666;font-size:14px;font-weight:600;text-decoration:none;
-                    border-radius:5px;border:1px solid #ddd;">✗ Reject</a>
-        </td>
-      </tr>
-    </table>
+    {image_row}
+
+    {action_buttons}
   </td></tr>
 </table>"""
 
 
 def send_linkedin_approval_email(token: str, post_text: str, entry: dict,
-                                  wp_post_url: Optional[str]):
+                                  wp_post_url: Optional[str],
+                                  image_urls: Optional[list[str]] = None):
     smtp_user = CONFIG["smtp_user"]
     smtp_pass = CONFIG["smtp_password"]
     if not (smtp_user and smtp_pass):
-        log.warning("SMTP credentials not set — skipping LinkedIn email.")
+        log.warning("SMTP credentials not set, skipping LinkedIn email.")
         return
     if not (LINKEDIN_CONFIG["pa_linkedin_approve_url"] and LINKEDIN_CONFIG["pa_linkedin_reject_url"]):
-        log.warning("PA LinkedIn URLs not set — skipping LinkedIn email.")
+        log.warning("PA LinkedIn URLs not set, skipping LinkedIn email.")
         return
 
     date_str   = datetime.now(timezone.utc).strftime("%d %B %Y")
-    subject    = f"Wolf Jansen LinkedIn draft ready for review — {date_str}"
+    subject    = f"Wolf Jansen LinkedIn draft ready for review, {date_str}"
     recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
 
-    card = _linkedin_card_html(token, post_text, entry, wp_post_url)
+    card = _linkedin_card_html(token, post_text, entry, wp_post_url, image_urls)
 
     html_body = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
@@ -584,13 +829,28 @@ def send_linkedin_approval_email(token: str, post_text: str, entry: dict,
   </td></tr>
 </table></body></html>"""
 
-    plain = (
-        f"Wolf Jansen LinkedIn draft\n\n"
-        f"Based on: {entry.get('title','')}\n\n"
-        f"{post_text}\n\n"
-        f"Approve: {_pages_url('approve-linkedin', LINKEDIN_CONFIG['pa_linkedin_approve_url'], token)}\n"
-        f"Reject:  {_pages_url('reject-linkedin',  LINKEDIN_CONFIG['pa_linkedin_reject_url'],  token)}\n"
-    )
+    pa_approve = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
+    text_only_url = _pages_url_approve_image(pa_approve, token, "none")
+    reject_link   = _pages_url("reject-linkedin", LINKEDIN_CONFIG["pa_linkedin_reject_url"], token)
+
+    plain_lines = [
+        "Wolf Jansen LinkedIn draft",
+        "",
+        f"Based on: {entry.get('title','')}",
+        "",
+        post_text,
+        "",
+    ]
+    if image_urls:
+        for i, img_url in enumerate(image_urls, start=1):
+            link = _pages_url_approve_image(pa_approve, token, str(i))
+            plain_lines.append(f"Post with image {i}: {link}")
+            plain_lines.append(f"  preview: {img_url}")
+        plain_lines.append(f"Post as text only: {text_only_url}")
+    else:
+        plain_lines.append(f"Approve: {text_only_url}")
+    plain_lines.append(f"Reject:  {reject_link}")
+    plain = "\n".join(plain_lines) + "\n"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -681,14 +941,22 @@ def main():
         return
 
     token = str(uuid.uuid4())
+
+    # Generate image candidates. Returns [] if OpenAI/GitHub not configured or on
+    # any failure, in which case the approval email shows a single text-only
+    # approve button (same behaviour as before images were added).
+    image_urls = generate_image_candidates(pick, token, ai_client)
+    log.info(f"Image candidates: {len(image_urls)} uploaded")
+
     register_linkedin_draft(
         token        = token,
         source_token = pick["token"],
         entry        = pick,
         post_text    = rewritten["post_text"],
         wp_post_url  = wp_url,
+        image_urls   = image_urls,
     )
-    send_linkedin_approval_email(token, rewritten["post_text"], pick, wp_url)
+    send_linkedin_approval_email(token, rewritten["post_text"], pick, wp_url, image_urls)
 
     log.info("=" * 60)
 
