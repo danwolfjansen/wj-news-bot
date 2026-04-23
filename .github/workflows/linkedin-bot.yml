@@ -31,12 +31,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install feedparser anthropic requests python-dotenv openai
+        run: pip install feedparser anthropic requests python-dotenv fal-client
 
       - name: Run LinkedIn bot
         env:
           ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY:           ${{ secrets.OPENAI_API_KEY }}
+          FAL_KEY:                  ${{ secrets.FAL_KEY }}
           SMTP_HOST:                smtp.gmail.com
           SMTP_PORT:                "587"
           SMTP_USER:                ${{ secrets.SMTP_USER }}
