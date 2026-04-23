@@ -71,7 +71,7 @@ LINKEDIN_CONFIG = {
     # How far back to look for candidate stories (days).
     "lookback_days": int(os.getenv("LINKEDIN_LOOKBACK_DAYS", "7")),
 
-    # OpenAI for DALL-E 3 image candidates.
+    # OpenAI for gpt-image-1 image candidates.
     "openai_api_key":   os.getenv("OPENAI_API_KEY", ""),
     # GitHub API for uploading generated images back to the repo.
     "github_token":     os.getenv("GITHUB_TOKEN", ""),
@@ -497,136 +497,111 @@ def _scrub_dashes(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# STEP 4b: Generate DALL-E image candidates for the LinkedIn post
+# STEP 4b: Generate gpt-image-1 candidates for the LinkedIn post
 # ---------------------------------------------------------------------------
 _IMAGE_STYLE_TEMPLATE = (
-    "Photograph of: {concept}. "
-    "This scene fills the entire frame. The photograph must show exactly this "
-    "subject — do not substitute a more generic scene. "
-    "A real photograph taken this week with a full-frame digital camera. "
+    "Editorial photograph: {concept}. "
+    "A real photograph, the kind that would run alongside a lead article in "
+    "the Financial Times, The Economist, Reuters, or Bloomberg. Documentary "
+    "style. Natural available light. Shot on a full-frame digital camera with "
+    "a prime lens. "
+    "Physically realistic: correct proportions, plausible lighting and "
+    "shadows, materials that look like their real-world counterparts. "
     "NOT an illustration. NOT a 3D render. NOT CGI. NOT digital art. "
-    "NOT a painting. NOT a stylized image. "
-    "Shot by a working photojournalist on assignment for Reuters, Getty Images, "
-    "or Associated Press. Documentary style. Available light only. "
-    "Straightforward composition. "
-    "Physically realistic: every object sized and proportioned as it would be "
-    "in real life. Physically plausible lighting, shadows, and reflections. "
-    "Materials look like their real-world materials (metal looks like metal, "
-    "concrete looks like concrete, glass looks like glass). "
-    "Do not include: people, faces, hands, body parts, silhouettes of people. "
-    "Do not include: visible text, letters, words, logos, brand names, company "
-    "signage, typography, readable signs, legible numbers, charts, graphs. "
-    "Do not include: a specific named manufacturer's patented machine design "
-    "or identifiable branded product. Depict the category of equipment typical "
-    "to the industry (for example, 'a pharmaceutical blister-pack line' rather "
-    "than 'an Uhlmann SB 60 machine'). Keep the industry context fully visible. "
-    "Do not produce: 3D renders, digital art, illustration, painting, CGI, "
-    "hyper-real rendered look, over-processed HDR, sepia, yellow filter, heavy "
-    "grain, vintage aesthetic, stock-photo look, or anything that does not "
-    "look like a real documentary photograph."
+    "NOT a painting. NOT stock-photo aesthetic. NOT an over-lit composite. "
+    "Avoid: readable company logos, brand names, legible signage, identifiable "
+    "trademarks. Avoid: recognisable real public figures (politicians, CEOs, "
+    "celebrities). If a person is in frame, they should be anonymous — shot "
+    "from behind, in profile, with face obscured or out of focus, or at a "
+    "distance. Avoid: a specific named manufacturer\'s patented machine or "
+    "identifiable branded product (depict the category of equipment, not a "
+    "specific model). "
+    "Avoid: over-processed HDR, heavy grain, sepia, yellow filter, vintage "
+    "aesthetic, hyper-real rendered look."
 )
 
 
 def _build_story_concept(entry: dict, anthropic_client: anthropic.Anthropic) -> str:
-    """Ask Claude Haiku to describe a concrete, photographable scene for the story."""
+    """Ask Claude Haiku to propose a concrete, story-specific photograph."""
     title   = (entry.get("title", "")   or "")[:200]
-    excerpt = (entry.get("excerpt", "") or "")[:600]
+    excerpt = (entry.get("excerpt", "") or "")[:800]
     prompt = (
-        "Suggest a single concrete visual scene that an editorial photographer "
-        "could shoot to illustrate the story below. Pick a real physical place "
-        "or objects, with specific detail about lighting, environment, and "
-        "what is in frame. Think FT / Economist / Bloomberg photo desk.\n\n"
-        "STEP 1 — Identify the industry / sector of the main subject from the "
-        "title and excerpt: pharma, packaging, manufacturing, automotive, "
-        "logistics, enterprise software / SAP, financial services, professional "
-        "services, energy, healthcare, retail, etc. If a specific named company "
-        "is the subject, infer THAT company's industry, not the story's framing "
-        "industry.\n\n"
-        "STEP 2 — Pick a scene that evokes THAT industry's setting. The scene "
-        "must feel like it belongs to that industry, not a generic boardroom.\n\n"
-        "Good industry-specific examples (copy this level of specificity):\n"
-        "  - Pharma / packaging: a pharmaceutical packaging line at rest, "
-        "blister packs moving along a stainless-steel conveyor under clean "
-        "fluorescent light, polished floor reflecting the line\n"
-        "  - Pharma / lab: rows of amber glass vials on a stainless steel "
-        "bench under cool overhead light, shallow depth of field, a single "
-        "empty petri dish in the foreground\n"
-        "  - Manufacturing / industrial: a factory floor at shift change, "
-        "overhead crane casting long shadows across polished concrete, roller "
-        "doors partially raised, golden hour light spilling in\n"
-        "  - Automotive: a quiet assembly hall at dusk, a single unpainted "
-        "body shell on a conveyor under hanging work-lights, the rest of the "
-        "hall in shadow\n"
-        "  - Logistics: shipping containers stacked at a quiet port at dusk, "
-        "low fog rolling across the yard, gantry cranes silhouetted against an "
-        "indigo sky\n"
-        "  - Enterprise tech / SAP: a row of server racks glowing with faint "
-        "blue LEDs in a cold, dark data centre, cables neatly coiled on the "
-        "raised floor\n"
-        "  - Financial services: an empty trading desk after hours, a wall of "
-        "dark monitors, a single desk lamp throwing warm light across scattered "
-        "papers and a half-drunk glass of water\n"
-        "  - Professional services / audit: a stack of printed quarterly "
-        "reports on a wooden desk beside a cooling cup of black coffee, golden "
-        "hour light from a tall window\n"
-        "  - Energy: transmission pylons silhouetted against a cold pink dawn "
-        "sky, frost on the cables, no one in frame\n"
-        "  - Generic business (fallback only): an empty boardroom at dusk, "
-        "printed documents spread across the polished table, chairs pushed "
-        "back, city skyline in the blue hour\n\n"
-        "Bad examples (do NOT produce anything like this):\n"
-        "  - Economic uncertainty and transformation\n"
-        "  - The future of finance leadership\n"
-        "  - Abstract shapes representing complexity\n"
-        "  - Geometric composition symbolising change\n\n"
-        "Rules for the scene:\n"
-        "  - No people, no faces, no hands, no body parts, no silhouettes of people.\n"
-        "  - No visible text, numbers, logos, brand names, or company signage.\n"
-        "  - Show GENERIC industry equipment / environment. Do NOT depict a "
-        "specific named company's branded machine, patented equipment design, "
-        "or identifiable product. Describe the category of equipment, not a "
-        "specific manufacturer's model.\n"
-        "  - Must be a real physical scene, not a pattern or abstract composition.\n"
-        "  - The scene must match the industry of the main subject, not just "
-        "business at large.\n\n"
+        "You are an editorial photo editor at the Financial Times. A reporter "
+        "has filed the story below and you need a lead photo to run with it. "
+        "Propose a single concrete scene a staff photographer could shoot "
+        "TODAY that would illustrate THIS specific story — not a generic "
+        "industry vibe.\n\n"
+        "Read the story carefully and identify: the specific company or "
+        "organisation, the specific person or role involved (if any), the "
+        "specific event or decision being reported, and the specific setting "
+        "where it happened or would happen.\n\n"
+        "Then describe a scene that connects to those specifics. Good scenes "
+        "anchor to something concrete in the story:\n"
+        "  - the doorway of the company\'s HQ building, morning light, an "
+        "employee walking in with a coffee\n"
+        "  - a figure shot from behind at a podium, conference hall half-lit, "
+        "a blurred audience in the foreground (for a keynote / announcement)\n"
+        "  - a figure in a suit photographed from behind looking out a "
+        "high-floor office window onto a specific skyline (for an executive "
+        "move / appointment story)\n"
+        "  - a specific street corner, neighbourhood, plant exterior, airport "
+        "gate, port, lab, hospital corridor, retail floor, courtroom, factory "
+        "door — whatever is physically tied to the story\n"
+        "  - hands on a keyboard, a boardroom table mid-meeting with anonymous "
+        "figures, a lone commuter on an empty platform at dawn\n\n"
+        "Scenes to avoid:\n"
+        "  - generic empty boardrooms, trading floors, server rooms, or "
+        "skyline shots that could illustrate any story in the sector\n"
+        "  - abstract / symbolic compositions (\'geometric shapes representing "
+        "change\', \'abstract patterns of data\')\n"
+        "  - anything that reads as a stock photo cliché\n\n"
+        "Constraints:\n"
+        "  - If a person is in frame, describe them anonymously: shot from "
+        "behind, in profile, face obscured, face out of focus, or at a "
+        "distance. Never name a real public figure.\n"
+        "  - No readable logos, brand names, or signage in frame.\n"
+        "  - Describe generic equipment (\'a pharmaceutical packaging line\'), "
+        "not a specific named manufacturer\'s model.\n"
+        "  - Must be a real physical scene — place, light, objects, optionally "
+        "an anonymous human figure — not a pattern or abstraction.\n\n"
         f"Story title: {title}\n"
         f"Story excerpt: {excerpt}\n\n"
-        "Return ONE sentence (25-50 words) describing the photograph. No quotes, "
-        "no prefix, no label — just the sentence."
+        "Return ONE sentence (25-50 words) describing the photograph. Include "
+        "lighting, framing, and at least one specific detail that ties the "
+        "scene to THIS story. No quotes, no prefix, no label — just the "
+        "sentence."
     )
     try:
         resp = anthropic_client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+            max_tokens=250,
             messages=[{"role": "user", "content": prompt}],
         )
         concept = (resp.content[0].text or "").strip().strip('"').strip("'")
         if concept:
-            return concept[:500]
+            return concept[:600]
     except Exception as e:
         log.warning(f"Concept distillation failed: {e}")
-    # Fallback — a safe, neutral business scene.
-    return ("An empty boardroom at dusk, printed documents scattered across a "
-            "polished conference table, chairs slightly pushed back, city lights "
-            "visible through tall windows")
+    # Fallback — a safe, neutral editorial scene.
+    return ("A figure in a dark suit photographed from behind, walking through "
+            "the revolving door of a glass-fronted office building at morning, "
+            "soft diffused daylight, shallow depth of field")
 
 
 def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]:
-    """Single DALL-E 3 call. Returns PNG bytes or None on failure."""
+    """Single gpt-image-1 call. Returns PNG bytes or None on failure."""
     try:
         resp = openai_client.images.generate(
-            model="dall-e-3",
+            model="gpt-image-1",
             prompt=prompt,
-            n=1,                    # DALL-E 3 only supports n=1 per call
-            size="1792x1024",       # landscape — closest to LinkedIn 1200x627
-            quality="hd",           # $0.080/image — cleaner proportions + detail
-            response_format="b64_json",
-            style="natural",        # less hyper-saturated than "vivid"
+            n=1,
+            size="1536x1024",       # landscape — closest to LinkedIn 1200x627
+            quality="high",         # gpt-image-1 uses low/medium/high
         )
         b64 = resp.data[0].b64_json
         return base64.b64decode(b64)
     except Exception as e:
-        log.error(f"DALL-E image #{idx} failed: {e}")
+        log.error(f"gpt-image-1 call #{idx} failed: {e}")
         return None
 
 
@@ -670,7 +645,7 @@ def _upload_image_to_repo(image_bytes: bytes, filename: str) -> Optional[str]:
 def generate_image_candidates(entry: dict, token: str,
                               anthropic_client: anthropic.Anthropic) -> list[str]:
     """
-    Generate N DALL-E image candidates, commit each to the repo, return public URLs.
+    Generate N gpt-image-1 candidates, commit each to the repo, return public URLs.
     On any failure, returns fewer than N (or an empty list). The bot keeps going
     and the approval email falls back to text-only cleanly.
     """
