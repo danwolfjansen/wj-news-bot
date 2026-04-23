@@ -479,41 +479,73 @@ def _scrub_dashes(text: str) -> str:
 # STEP 4b: Generate DALL-E image candidates for the LinkedIn post
 # ---------------------------------------------------------------------------
 _IMAGE_STYLE_TEMPLATE = (
-    "Abstract editorial photography. Minimalist composition with geometric "
-    "shapes and soft natural lighting. Deep navy blue (#132147) and muted "
-    "white palette, matte textures, subtle gradients. Shallow depth of field, "
-    "cinematic framing. No people, no faces, no hands, no bodies, no text, "
-    "no letters, no logos, no typography, no signs, no numbers. Clean, "
-    "understated, corporate. Subtle conceptual representation of: {concept}. "
-    "Professional visual for a senior-executive LinkedIn audience."
+    "Editorial photography in the style of a serious business publication "
+    "(Financial Times, The Economist, Bloomberg Businessweek). Cinematic "
+    "lighting, shallow depth of field, clear real-world subject matter with "
+    "a tangible physical scene. Cool colour grading: deep navy (#132147), "
+    "charcoal, and muted off-white tones. Matte texture, restrained composition, "
+    "serious tone. "
+    "Photograph this specific scene: {concept}. "
+    "Strict rules: no people, no faces, no hands, no body parts, no silhouettes, "
+    "no crowds. No visible text, no letters, no words, no logos, no typography, "
+    "no readable signs, no legible numbers, no charts or graphs with labels. "
+    "The image must depict a real physical place or objects. Do NOT produce "
+    "abstract geometric patterns, floating shapes, minimalist 3D renders, or "
+    "stock-image-style backgrounds."
 )
 
 
 def _build_story_concept(entry: dict, anthropic_client: anthropic.Anthropic) -> str:
-    """Ask Claude Haiku to distil the story into a short visual concept."""
+    """Ask Claude Haiku to describe a concrete, photographable scene for the story."""
     title   = (entry.get("title", "")   or "")[:200]
     excerpt = (entry.get("excerpt", "") or "")[:600]
     prompt = (
-        "Distil the story below into a SHORT visual concept phrase (6-12 words) "
-        "suitable for an abstract editorial photograph. Describe subject matter "
-        "and mood only, no style words, no colour words, no 'photo of' / 'image of', "
-        "no people, no text. Just the concept.\n\n"
-        f"Title: {title}\nExcerpt: {excerpt}\n\n"
-        "Return ONLY the concept phrase, no quotes, no prefix."
+        "Suggest a single concrete visual scene that an editorial photographer "
+        "could shoot to illustrate the story below. Pick a real physical place "
+        "or objects, with specific detail about lighting, environment, and "
+        "what is in frame. Think FT / Economist / Bloomberg photo desk.\n\n"
+        "Good examples (copy this level of specificity):\n"
+        "  - An empty, dimly-lit boardroom at dusk, documents spread across the "
+        "polished table, chairs pushed back, floor-to-ceiling windows showing a "
+        "city skyline in the blue hour\n"
+        "  - A row of server racks glowing with faint blue LEDs in a cold, dark "
+        "data centre, cables neatly coiled on the raised floor\n"
+        "  - A stack of printed quarterly reports on a wooden desk beside a "
+        "cooling cup of black coffee, golden hour light from a tall window\n"
+        "  - Shipping containers stacked at a quiet port at dusk, low fog "
+        "rolling across the yard, gantry cranes silhouetted against an indigo sky\n"
+        "  - A single workstation in an open-plan office long after hours, "
+        "monitor glow casting blue light across papers and a keyboard\n\n"
+        "Bad examples (do NOT produce anything like this):\n"
+        "  - Economic uncertainty and transformation\n"
+        "  - The future of finance leadership\n"
+        "  - Abstract shapes representing complexity\n"
+        "  - Geometric composition symbolising change\n\n"
+        "Rules for the scene:\n"
+        "  - No people, no faces, no hands, no body parts, no silhouettes of people.\n"
+        "  - No visible text, numbers, or logos in the frame.\n"
+        "  - Must be a real physical scene, not a pattern or abstract composition.\n"
+        "  - Connect meaningfully to the STORY, not just to the industry in general.\n\n"
+        f"Story title: {title}\n"
+        f"Story excerpt: {excerpt}\n\n"
+        "Return ONE sentence (25-50 words) describing the photograph. No quotes, "
+        "no prefix, no label — just the sentence."
     )
     try:
         resp = anthropic_client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=60,
+            max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
         concept = (resp.content[0].text or "").strip().strip('"').strip("'")
         if concept:
-            return concept[:200]
+            return concept[:500]
     except Exception as e:
         log.warning(f"Concept distillation failed: {e}")
-    # Fallback: strip the title of obvious noise and use it directly.
-    return title[:120] or "business transformation and talent movement"
+    # Fallback — a safe, neutral business scene.
+    return ("An empty boardroom at dusk, printed documents scattered across a "
+            "polished conference table, chairs slightly pushed back, city lights "
+            "visible through tall windows")
 
 
 def _generate_one_image(openai_client, prompt: str, idx: int) -> Optional[bytes]:
