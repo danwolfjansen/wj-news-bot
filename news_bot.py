@@ -260,16 +260,35 @@ BANNED headline patterns — never use regardless of structure number:
 Never repeat a headline structure used elsewhere in the same batch.
 
 ## Final check before returning
-Scan title, excerpt, and body for:
-1. Em-dash character "—" (U+2014). Remove or replace with a comma or colon.
-2. En-dash character "–" (U+2013) outside number ranges. Remove.
-3. Contrastive "not X, (it's|but|rather) Y". Rewrite to state the point directly.
-4. The phrases "play out", "playing out", "unfold", "in real time",
-   "worth heeding", "worth noting", "the signal", "Here's the", "Here's what". Rewrite.
-5. Any banned subheading from the list above ("What we're seeing", "What this means",
-   "Our perspective", "Implications for", "What we're watching", "Why this matters"). Rename.
-6. Any headline containing "What X means", "What X tells us", "momentum", "continues". Rewrite.
-If any trigger fires, rewrite before outputting.
+This is mandatory. Before producing the JSON output, scan every <h2> tag in the body.
+If any <h2> matches or starts with any of the following, you MUST rename it to something
+specific to this story before continuing:
+
+BANNED <h2> openings (any variation, any capitalisation):
+- "What this means" / "What that means"
+- "What we're seeing" / "What we are seeing" / "What we're watching"
+- "What we're telling" / "What we told"
+- "Why this matters" / "Why it matters"
+- "Our advice" / "Our perspective" / "Our view" / "Our take"
+- "Implications for" / "Impact on" / "The impact"
+- "The talent angle" / "The hiring angle" / "The hiring implications"
+- "Timing considerations" / "Looking ahead" / "The broader pattern"
+
+If you find any of these, stop and rename the subheading to something concrete and
+story-specific (e.g. instead of "What this means for talent" use "Why procurement
+managers are re-skilling now" or just remove the subheading and fold the content
+into a paragraph).
+
+Then also check:
+- Em-dash "—" anywhere. Replace with a comma, colon, or rephrase.
+- En-dash "–" outside number ranges. Remove.
+- Contrastive "not X, it's Y" constructions. Rewrite.
+- Phrases: "play out", "unfold", "in real time", "worth noting", "the signal",
+  "Here's the", "Here's what", "12 to 18 months" appearing more than once across
+  the batch. Rewrite.
+- Headline containing "What X means", "What X tells us", "momentum", "continues". Rewrite.
+
+Do not output the JSON until all checks pass.
 
 ## Output format
 Return ONLY a JSON object with these fields:
