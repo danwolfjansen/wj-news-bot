@@ -295,12 +295,12 @@ Return ONLY a JSON object with these fields:
 {
   "title": "A punchy, original headline written from our perspective (not copied from the source)",
   "excerpt": "2–3 sentences in first person, teasing our take on the story",
-  "body": "The full post in HTML format. Use <p>, <h2>, <strong> tags as appropriate.
-           Aim for 250–400 words. Write throughout as Wolf Jansen speaking — use 'we',
-           'our', 'in our view'. Vary sentence length — mix short punchy sentences with
-           longer ones. Use subheadings sparingly and only when they add something specific,
-           never as generic section labels. End with a subtle source credit in small italic
-           text: <p><em>Prompted by reporting from SOURCE_NAME.</em></p>",
+  "body": "The full post in HTML format. Use <p> and <strong> tags only. DO NOT use
+           <h2> or any subheadings. Write in flowing prose paragraphs — 4 to 6 paragraphs,
+           250–400 words total. Write throughout as Wolf Jansen speaking — use 'we', 'our',
+           'in our view'. Vary sentence length: mix short punchy sentences with longer ones.
+           End with a subtle source credit in small italic text:
+           <p><em>Prompted by reporting from SOURCE_NAME.</em></p>",
   "tags": ["tag1", "tag2", "tag3"]
 }
 """
