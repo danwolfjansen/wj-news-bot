@@ -460,6 +460,67 @@ def is_story_relevant(story: dict, division_key: str, client: anthropic.Anthropi
         return True
 
 
+_BANNED_HEADLINE_FRAGMENTS = [
+    "what this means", "what that means", "what it means",
+    "what they mean", "what these mean",
+    "what this tells us", "what that tells us", "what it tells us",
+    "what we're watching", "what we are watching",
+    "momentum", " continues",
+]
+
+def _headline_is_banned(title: str) -> bool:
+    t = title.lower()
+    return any(frag in t for frag in _BANNED_HEADLINE_FRAGMENTS)
+
+
+def _enforce_headline(title: str, story: dict, client: anthropic.Anthropic,
+                      max_attempts: int = 3) -> str:
+    """If the generated headline uses a banned pattern, ask Claude to rewrite
+    just the title until it passes or we run out of attempts."""
+    if not _headline_is_banned(title):
+        return title
+
+    log.warning(f"  Banned headline pattern detected: '{title}' — regenerating")
+    prompt = f"""The following headline uses a banned pattern and must be rewritten:
+
+BANNED HEADLINE: {title}
+
+Story context:
+- Source: {story['source']}
+- Division: {story['division']}
+- Original title: {story['title']}
+- Summary: {story['summary'][:300]}
+
+Write ONE new headline that:
+- Does NOT contain "what this means", "what it means", "what tells us",
+  "momentum", or any "What X means for Y" construction
+- Is punchy and specific to this story
+- Uses one of these structures: a direct market observation, a tension/contradiction,
+  a bold specific claim, a market verdict, or a candidate's-eye observation
+- Is under 12 words
+
+Return ONLY the headline text, nothing else."""
+
+    for attempt in range(max_attempts):
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=60,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            new_title = resp.content[0].text.strip().strip('"').strip("'")
+            if not _headline_is_banned(new_title):
+                log.info(f"  Headline replaced: '{new_title}'")
+                return new_title
+            log.warning(f"  Attempt {attempt+1} still banned: '{new_title}'")
+        except Exception as e:
+            log.warning(f"  Headline regeneration failed: {e}")
+            break
+
+    log.warning("  Could not fix headline — using original")
+    return title
+
+
 # ---------------------------------------------------------------------------
 # STEP 2b: Rewrite with Claude
 # ---------------------------------------------------------------------------
@@ -496,6 +557,9 @@ the body with a link back to the original source at {story['link']}.
             for field in ("title", "excerpt", "body"):
                 if result.get(field) and isinstance(result[field], str):
                     result[field] = _scrub_dashes(result[field])
+        # Hard-reject banned headline patterns and regenerate title only.
+        if isinstance(result, dict) and result.get("title"):
+            result["title"] = _enforce_headline(result["title"], story, client)
         return result
     except Exception as e:
         log.error(f"  Rewrite failed for '{story['title']}': {e}")
