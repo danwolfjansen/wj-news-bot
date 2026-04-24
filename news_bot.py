@@ -557,6 +557,9 @@ the body with a link back to the original source at {story['link']}.
             for field in ("title", "excerpt", "body"):
                 if result.get(field) and isinstance(result[field], str):
                     result[field] = _scrub_dashes(result[field])
+            # Strip all <h2> subheadings from body regardless of prompt compliance.
+            if result.get("body"):
+                result["body"] = _strip_subheadings(result["body"])
         # Hard-reject banned headline patterns and regenerate title only.
         if isinstance(result, dict) and result.get("title"):
             result["title"] = _enforce_headline(result["title"], story, client)
@@ -564,6 +567,19 @@ the body with a link back to the original source at {story['link']}.
     except Exception as e:
         log.error(f"  Rewrite failed for '{story['title']}': {e}")
         return None
+
+
+def _strip_subheadings(html: str) -> str:
+    """Remove all <h2>...</h2> tags from post body, replacing with a blank
+    paragraph break so the prose flows without section labels."""
+    import re as _re
+    # Replace <h2>text</h2> with nothing — the paragraph that follows carries on
+    html = _re.sub(r"<h2[^>]*>.*?</h2>", "", html, flags=_re.IGNORECASE | _re.DOTALL)
+    # Also catch <h3> in case the model uses those
+    html = _re.sub(r"<h3[^>]*>.*?</h3>", "", html, flags=_re.IGNORECASE | _re.DOTALL)
+    # Clean up any double blank lines left behind
+    html = _re.sub(r"(\s*<p>\s*</p>)+", "", html)
+    return html.strip()
 
 
 def _scrub_dashes(text: str) -> str:
