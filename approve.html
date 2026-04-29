@@ -49,7 +49,9 @@
     if (!encoded || !token) {
       show('❌', 'Invalid link', 'This approval link is missing required information.');
     } else {
-      const paUrl = atob(encoded) + '&token=' + encodeURIComponent(token);
+      const postId = params.get('post_id') || '';
+      let paUrl = atob(encoded) + '&token=' + encodeURIComponent(token);
+      if (postId) paUrl += '&post_id=' + encodeURIComponent(postId);
       fetch(paUrl, { method: 'GET', mode: 'no-cors' })
         .then(() => show('✅', 'Post approved', 'The post has been sent to the Wolf Jansen website.'))
         .catch(() => show('❌', 'Something went wrong', 'Please try again or approve on desktop.'));

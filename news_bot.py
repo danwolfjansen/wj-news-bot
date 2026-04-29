@@ -22,6 +22,7 @@ import smtplib
 import uuid
 import fcntl
 import sys
+import base64
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
@@ -517,11 +518,17 @@ def create_wp_draft(title: str, body: str, excerpt: str, division: str) -> Optio
             json=payload,
             headers={
                 "Authorization": f"Basic {credentials}",
-                "Content-Type":  "application/json",
+                "Accept":        "application/json",
+                "User-Agent":    "Mozilla/5.0 (compatible; WJNewsBot/1.0)",
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            log.error(
+                f"  WP draft creation failed: {resp.status_code} {resp.reason} — "
+                f"response body: {resp.text[:400]}"
+            )
+            return None
         post_id = resp.json()["id"]
         log.info(f"  ✓ WP draft created: post_id={post_id}")
         return post_id
@@ -776,17 +783,20 @@ def _scrub_dashes(text: str) -> str:
 # ---------------------------------------------------------------------------
 # STEP 3: Build & send approval email
 # ---------------------------------------------------------------------------
+_PAGES_BASE = "https://danwolfjansen.github.io/wj-news-bot"
+
+def _pages_url(action: str, pa_url: str, token: str, post_id) -> str:
+    """Build a GitHub Pages URL that proxies to Power Automate.
+    Mobile browsers open the .html page directly; it calls PA silently.
+    """
+    encoded = base64.b64encode(pa_url.encode()).decode()
+    pid = post_id if post_id is not None else ""
+    return f"{_PAGES_BASE}/{action}.html?url={encoded}&token={token}&post_id={pid}"
+
 def _post_card_html(token: str, title: str, excerpt: str, body: str,
                     division: str, post_id=None) -> str:
-    approve_base = CONFIG["pa_approve_url"].rstrip("&")
-    reject_base  = CONFIG["pa_reject_url"].rstrip("&")
-    sep_a = "&" if "?" in approve_base else "?"
-    sep_r = "&" if "?" in reject_base else "?"
-    # post_id is embedded directly in the URL so Power Automate can call
-    # WordPress without looking anything up in OneDrive.
-    pid = post_id if post_id is not None else ""
-    approve_url = f"{approve_base}{sep_a}token={token}&post_id={pid}"
-    reject_url  = f"{reject_base}{sep_r}token={token}&post_id={pid}"
+    approve_url = _pages_url("approve", CONFIG["pa_approve_url"], token, post_id)
+    reject_url  = _pages_url("reject",  CONFIG["pa_reject_url"],  token, post_id)
 
     colour = DIVISION_COLOURS.get(division, "#333")
     label  = DIVISION_LABELS.get(division, division.replace("-", " ").title())
@@ -917,16 +927,12 @@ def send_approval_email(new_drafts: list[dict]):
     # Plain text fallback
     plain_lines = [f"Wolf Jansen News Bot — {count} draft(s) for review\n"]
     for d in new_drafts:
-        approve_base = CONFIG["pa_approve_url"].rstrip("&")
-        reject_base  = CONFIG["pa_reject_url"].rstrip("&")
-        sep_a = "&" if "?" in approve_base else "?"
-        sep_r = "&" if "?" in reject_base else "?"
-        pid = d.get("post_id") or ""
+        pid = d.get("post_id") or None
         plain_lines += [
             f"[{DIVISION_LABELS.get(d['division'], d['division'])}]",
             f"{d['title']}",
-            f"Approve: {approve_base}{sep_a}token={d['token']}&post_id={pid}",
-            f"Reject:  {reject_base}{sep_r}token={d['token']}&post_id={pid}\n",
+            f"Approve: {_pages_url('approve', CONFIG['pa_approve_url'], d['token'], pid)}",
+            f"Reject:  {_pages_url('reject',  CONFIG['pa_reject_url'],  d['token'], pid)}\n",
         ]
 
     recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
