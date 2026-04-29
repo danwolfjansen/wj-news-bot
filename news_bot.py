@@ -20,6 +20,8 @@ import hashlib
 import logging
 import smtplib
 import uuid
+import fcntl
+import sys
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
@@ -71,16 +73,28 @@ CONFIG = {
     # How many stories per division per run
     "max_stories_per_division": 3,
 
+    # Relative path — intentional. GitHub Actions checks out the repo and then
+    # commits seen_stories.json back via `git add seen_stories.json`.  This only
+    # works if the file sits in the repo working directory.  The launchd plist
+    # has been disabled (see README), so there is no longer a second runner that
+    # would create a divergent local copy of this file.
     "seen_stories_file": "seen_stories.json",
 }
 
 
 def _pending_file_path() -> str:
+    """Local working copy — never inside OneDrive, so no sync-lock issues."""
+    local_dir = os.path.expanduser("~/.newsbot")
+    os.makedirs(local_dir, exist_ok=True)
+    return os.path.join(local_dir, "pending_approvals.json")
+
+
+def _pending_onedrive_path() -> str:
+    """OneDrive path used only for pushing updates so Power Automate can read them."""
     folder = CONFIG["onedrive_folder"].strip()
     if folder:
-        os.makedirs(folder, exist_ok=True)
         return os.path.join(folder, "pending_approvals.json")
-    return "pending_approvals.json"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -350,23 +364,185 @@ def story_id(entry) -> str:
 # HELPERS: pending drafts (stored in OneDrive)
 # ---------------------------------------------------------------------------
 def load_pending() -> dict:
-    path = _pending_file_path()
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return {}
+    import shutil
+    local = _pending_file_path()
+    onedrive = _pending_onedrive_path()
+    # Bootstrap local copy from OneDrive the first time
+    if not os.path.exists(local) and onedrive and os.path.exists(onedrive):
+        try:
+            shutil.copy2(onedrive, local)
+            log.info("  Bootstrapped local pending copy from OneDrive.")
+        except OSError:
+            pass
+    if not os.path.exists(local):
+        return {}
+    try:
+        with open(local, "r") as f:
+            content = f.read().strip()
+        if not content:
+            log.warning("  pending_approvals.json is empty — starting fresh.")
+            return {}
+        return json.loads(content)
+    except json.JSONDecodeError as e:
+        log.warning(f"  pending_approvals.json corrupt ({e}) — starting fresh.")
+        return {}
 
 
 def save_pending(data: dict):
-    path = _pending_file_path()
-    with open(path, "w") as f:
+    import time, shutil
+    local = _pending_file_path()
+    # Write locally first — instant, no lock issues
+    with open(local, "w") as f:
         json.dump(data, f, indent=2)
-    log.info(f"  Drafts saved to: {path}")
+    log.info(f"  Drafts saved locally: {local}")
+
+    # Path 1 — macOS: write directly to the OneDrive sync folder
+    onedrive = _pending_onedrive_path()
+    if onedrive:
+        for attempt in range(20):
+            try:
+                with open(local, "r") as f_in:
+                    content = f_in.read()
+                with open(onedrive, "w") as f_out:
+                    f_out.write(content)
+                log.info(f"  Drafts synced to OneDrive (local path): {onedrive}")
+                return
+            except OSError as e:
+                if e.errno in (11, 35) and attempt < 19:
+                    log.warning(f"  OneDrive sync locked (attempt {attempt+1}/20), retrying in 5s…")
+                    time.sleep(5)
+                else:
+                    log.error(f"  OneDrive sync failed after retries: {e}")
+                    return
+
+    # Path 2 — GitHub Actions / no local OneDrive mount: upload via Microsoft Graph API.
+    # Uses the same MS_* credentials already stored as GitHub Actions secrets.
+    _upload_pending_via_graph(local)
+
+
+def _upload_pending_via_graph(local_path: str):
+    """Upload pending_approvals.json to the NewsBot OneDrive folder via
+    Microsoft Graph API.  Called when ONEDRIVE_FOLDER is not set (i.e. when
+    running in GitHub Actions where there is no local OneDrive mount).
+
+    Requires the Azure app registration to have Files.ReadWrite.All
+    application permission consented in the tenant.
+    """
+    import requests as _req
+
+    tenant   = os.getenv("MS_TENANT_ID", "").strip()
+    client   = os.getenv("MS_CLIENT_ID", "").strip()
+    secret   = os.getenv("MS_CLIENT_SECRET", "").strip()
+    user     = os.getenv("MS_USER_EMAIL", "").strip()
+
+    if not all([tenant, client, secret, user]):
+        log.warning("  MS Graph credentials not set — pending_approvals.json not uploaded to OneDrive.")
+        return
+
+    try:
+        # 1. Get access token (client-credentials flow)
+        token_resp = _req.post(
+            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+            data={
+                "grant_type":    "client_credentials",
+                "client_id":     client,
+                "client_secret": secret,
+                "scope":         "https://graph.microsoft.com/.default",
+            },
+            timeout=30,
+        )
+        token_resp.raise_for_status()
+        access_token = token_resp.json()["access_token"]
+
+        # 2. Upload file to /NewsBot/pending_approvals.json in the user's OneDrive
+        with open(local_path, "rb") as f:
+            content = f.read()
+
+        upload_url = (
+            f"https://graph.microsoft.com/v1.0/users/{user}"
+            f"/drive/root:/NewsBot/pending_approvals.json:/content"
+        )
+        up_resp = _req.put(
+            upload_url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type":  "application/json",
+            },
+            data=content,
+            timeout=60,
+        )
+        up_resp.raise_for_status()
+        log.info("  Drafts uploaded to OneDrive via Microsoft Graph API.")
+
+    except Exception as e:
+        log.error(f"  Graph API upload failed: {e}. Power Automate will not see new drafts this run.")
+
+
+def create_wp_draft(title: str, body: str, excerpt: str, division: str) -> Optional[int]:
+    """Create a WordPress draft post immediately at generation time.
+
+    Storing the post_id in pending_approvals.json means the Power Automate
+    approval flow only needs to PATCH status → publish on the existing draft,
+    which is idempotent.  If two people click Approve simultaneously, both
+    just re-publish the same post — no duplicate is created.
+
+    Returns the WordPress post ID, or None if creation fails (bot continues
+    without WP draft; Power Automate falls back to creating the post itself).
+    """
+    import requests as _requests
+    import base64 as _base64
+
+    wp_url   = CONFIG["wp_url"].rstrip("/")
+    wp_user  = CONFIG["wp_user"]
+    wp_pass  = CONFIG["wp_password"]
+
+    if not (wp_url and wp_user and wp_pass):
+        log.warning("  WP credentials not configured — skipping WP draft creation.")
+        return None
+
+    credentials = _base64.b64encode(f"{wp_user}:{wp_pass}".encode()).decode()
+    category_id = DIVISION_CATEGORY_IDS[division]
+
+    payload = {
+        "title":      title,
+        "content":    body,
+        "excerpt":    excerpt,
+        "status":     "draft",
+        "categories": [26, category_id],  # 26 = Latest News parent category
+    }
+
+    try:
+        resp = _requests.post(
+            f"{wp_url}/wp-json/wp/v2/posts",
+            json=payload,
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type":  "application/json",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        post_id = resp.json()["id"]
+        log.info(f"  ✓ WP draft created: post_id={post_id}")
+        return post_id
+    except Exception as e:
+        log.error(f"  WP draft creation failed: {e}")
+        return None
 
 
 def register_draft(token: str, title: str, excerpt: str, body: str,
-                   tags: list, division: str):
-    """Save full draft content to OneDrive so Power Automate can post it on approval."""
+                   tags: list, division: str) -> Optional[int]:
+    """Create a WordPress draft, store the token in pending_approvals.json,
+    and return the WordPress post_id.
+
+    The post_id is embedded directly in the approve/reject URL so Power
+    Automate can call WordPress without needing to read OneDrive at all.
+    This makes the approval flow work from any environment (GitHub Actions,
+    local, etc.) and fixes the mobile 'Invoke download' issue caused by the
+    flow erroring before reaching its Response action.
+    """
+    post_id = create_wp_draft(title, body, excerpt, division)
+
     pending = load_pending()
     pending[token] = {
         "title":        title,
@@ -377,10 +553,12 @@ def register_draft(token: str, title: str, excerpt: str, body: str,
         "category_slug": FEEDS[division]["wp_category_slug"],
         "category_name": FEEDS[division]["wp_category_name"],
         "category_id":  DIVISION_CATEGORY_IDS[division],
+        "post_id":      post_id,
         "used":         False,
         "created":      datetime.now(timezone.utc).isoformat(),
     }
     save_pending(pending)
+    return post_id
 
 
 # ---------------------------------------------------------------------------
@@ -598,13 +776,17 @@ def _scrub_dashes(text: str) -> str:
 # ---------------------------------------------------------------------------
 # STEP 3: Build & send approval email
 # ---------------------------------------------------------------------------
-def _post_card_html(token: str, title: str, excerpt: str, body: str, division: str) -> str:
+def _post_card_html(token: str, title: str, excerpt: str, body: str,
+                    division: str, post_id=None) -> str:
     approve_base = CONFIG["pa_approve_url"].rstrip("&")
     reject_base  = CONFIG["pa_reject_url"].rstrip("&")
     sep_a = "&" if "?" in approve_base else "?"
     sep_r = "&" if "?" in reject_base else "?"
-    approve_url = f"{approve_base}{sep_a}token={token}"
-    reject_url  = f"{reject_base}{sep_r}token={token}"
+    # post_id is embedded directly in the URL so Power Automate can call
+    # WordPress without looking anything up in OneDrive.
+    pid = post_id if post_id is not None else ""
+    approve_url = f"{approve_base}{sep_a}token={token}&post_id={pid}"
+    reject_url  = f"{reject_base}{sep_r}token={token}&post_id={pid}"
 
     colour = DIVISION_COLOURS.get(division, "#333")
     label  = DIVISION_LABELS.get(division, division.replace("-", " ").title())
@@ -684,7 +866,8 @@ def send_approval_email(new_drafts: list[dict]):
     subject  = f"Wolf Jansen News: {count} draft{'s' if count != 1 else ''} ready for review — {date_str}"
 
     cards_html = "\n".join(
-        _post_card_html(d["token"], d["title"], d["excerpt"], d["body"], d["division"])
+        _post_card_html(d["token"], d["title"], d["excerpt"], d["body"],
+                        d["division"], d.get("post_id"))
         for d in new_drafts
     )
 
@@ -738,11 +921,12 @@ def send_approval_email(new_drafts: list[dict]):
         reject_base  = CONFIG["pa_reject_url"].rstrip("&")
         sep_a = "&" if "?" in approve_base else "?"
         sep_r = "&" if "?" in reject_base else "?"
+        pid = d.get("post_id") or ""
         plain_lines += [
             f"[{DIVISION_LABELS.get(d['division'], d['division'])}]",
             f"{d['title']}",
-            f"Approve: {approve_base}{sep_a}token={d['token']}",
-            f"Reject:  {reject_base}{sep_r}token={d['token']}\n",
+            f"Approve: {approve_base}{sep_a}token={d['token']}&post_id={pid}",
+            f"Reject:  {reject_base}{sep_r}token={d['token']}&post_id={pid}\n",
         ]
 
     recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
@@ -766,65 +950,107 @@ def send_approval_email(new_drafts: list[dict]):
 
 
 # ---------------------------------------------------------------------------
+# LOCK FILE — prevents two instances running at the same time
+# ---------------------------------------------------------------------------
+_LOCK_PATH = os.path.join(os.path.expanduser("~/.newsbot"), "newsbot.lock")
+
+
+def _acquire_lock():
+    """Open and exclusively lock ~/.newsbot/newsbot.lock.
+
+    Returns the open file descriptor on success.  Calls sys.exit(0) if
+    another instance already holds the lock — this is intentional: a
+    duplicate launchd trigger or accidental manual run should exit cleanly
+    rather than crash with a traceback.
+    """
+    os.makedirs(os.path.dirname(_LOCK_PATH), exist_ok=True)
+    lock_fd = open(_LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_fd.close()
+        log.warning("Another instance of the news bot is already running. Exiting.")
+        sys.exit(0)
+    lock_fd.write(str(os.getpid()))
+    lock_fd.flush()
+    return lock_fd
+
+
+def _release_lock(lock_fd):
+    """Release and remove the lock file."""
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
+        os.unlink(_LOCK_PATH)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
 def main():
-    log.info("=" * 60)
-    log.info(f"Wolf Jansen News Bot — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    log.info("=" * 60)
+    lock_fd = _acquire_lock()
+    try:
+        log.info("=" * 60)
+        log.info(f"Wolf Jansen News Bot — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        log.info("=" * 60)
 
-    seen = load_seen_stories()
-    log.info(f"Already processed: {len(seen)} stories")
+        seen = load_seen_stories()
+        log.info(f"Already processed: {len(seen)} stories")
 
-    ai_client  = anthropic.Anthropic(api_key=CONFIG["anthropic_api_key"])
-    new_drafts = []
+        ai_client  = anthropic.Anthropic(api_key=CONFIG["anthropic_api_key"])
+        new_drafts = []
 
-    for division_key in FEEDS:
-        log.info(f"\n--- Division: {division_key.upper()} ---")
-        stories = fetch_stories(division_key, seen)
-        log.info(f"  New stories found: {len(stories)}")
+        for division_key in FEEDS:
+            log.info(f"\n--- Division: {division_key.upper()} ---")
+            stories = fetch_stories(division_key, seen)
+            log.info(f"  New stories found: {len(stories)}")
 
-        for story in stories:
-            log.info(f"  Processing: {story['title'][:70]}...")
-            if not is_story_relevant(story, division_key, ai_client):
-                log.info(f"  ✗ Skipped (not relevant to {division_key})")
+            for story in stories:
+                log.info(f"  Processing: {story['title'][:70]}...")
+                if not is_story_relevant(story, division_key, ai_client):
+                    log.info(f"  ✗ Skipped (not relevant to {division_key})")
+                    seen.add(story["id"])
+                    continue
+                rewritten = rewrite_story(story, ai_client)
                 seen.add(story["id"])
-                continue
-            rewritten = rewrite_story(story, ai_client)
-            seen.add(story["id"])
 
-            if not rewritten:
-                log.warning("  Skipping — rewrite failed")
-                continue
+                if not rewritten:
+                    log.warning("  Skipping — rewrite failed")
+                    continue
 
-            token = str(uuid.uuid4())
-            register_draft(
-                token    = token,
-                title    = rewritten["title"],
-                excerpt  = rewritten["excerpt"],
-                body     = rewritten["body"],
-                tags     = rewritten.get("tags", []),
-                division = division_key,
-            )
-            new_drafts.append({
-                "token":    token,
-                "title":    rewritten["title"],
-                "excerpt":  rewritten["excerpt"],
-                "body":     rewritten["body"],
-                "division": division_key,
-            })
-            log.info(f"  ✓ Draft saved: '{rewritten['title']}'")
+                token = str(uuid.uuid4())
+                post_id = register_draft(
+                    token    = token,
+                    title    = rewritten["title"],
+                    excerpt  = rewritten["excerpt"],
+                    body     = rewritten["body"],
+                    tags     = rewritten.get("tags", []),
+                    division = division_key,
+                )
+                new_drafts.append({
+                    "token":    token,
+                    "post_id":  post_id,   # embedded in approve/reject URLs
+                    "title":    rewritten["title"],
+                    "excerpt":  rewritten["excerpt"],
+                    "body":     rewritten["body"],
+                    "division": division_key,
+                })
+                log.info(f"  ✓ Draft saved: '{rewritten['title']}'")
 
-    save_seen_stories(seen)
+        save_seen_stories(seen)
 
-    log.info(f"\n{len(new_drafts)} draft(s) ready.")
+        log.info(f"\n{len(new_drafts)} draft(s) ready.")
 
-    if new_drafts:
-        send_approval_email(new_drafts)
-    else:
-        log.info("No new stories found — nothing to send.")
+        if new_drafts:
+            send_approval_email(new_drafts)
+        else:
+            log.info("No new stories found — nothing to send.")
 
-    log.info("=" * 60)
+        log.info("=" * 60)
+    finally:
+        _release_lock(lock_fd)
 
 
 if __name__ == "__main__":
