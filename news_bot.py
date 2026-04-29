@@ -513,7 +513,7 @@ def create_wp_draft(title: str, body: str, excerpt: str, division: str) -> Optio
 
     try:
         resp = _requests.post(
-            f"{wp_url}/wp-json/wp/v2/posts",
+            f"{wp_url}/wp-json/wp/v2/posts?lang=en",
             json=payload,
             headers={
                 "Authorization": f"Basic {credentials}",
