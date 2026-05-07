@@ -172,9 +172,9 @@ and are focused on the German market.
   time references instead ("over the next 12-18 months", "in the coming year", "recently")
 
 ## Example of the right tone
-"SAP's move into mid-market changes who competes for the same talent. Smaller
-firms are now in conversations we used to have only with the enterprise players.
-The candidates who know both worlds are getting multiple calls a week."
+"We've seen this pattern before in our SAP practice. When a major vendor shifts
+strategy, the talent market follows within 12-18 months. Experience with the
+previous transition tends to become the most valuable thing on a CV."
 
 ## NEVER use these AI writing patterns
 These phrases make content sound machine-generated. Avoid all of them.
@@ -233,18 +233,6 @@ These phrases make content sound machine-generated. Avoid all of them.
   paragraph. Do NOT write a conclusion that starts "Despite its challenges..."
 - Repeated phrases across posts: Never use the same subheading, sentence opener, or
   closing thought more than once across all posts in a single batch.
-- Banned excerpt openers — never start an excerpt with any of these (they are overused
-  and make every post sound the same):
-    * "We've been watching..."
-    * "We've noticed..."
-    * "We're watching..."
-    * "We're seeing..."
-    * "We've seen this..."
-    * "We've been tracking..."
-    * "We've been following..."
-  Instead, open each excerpt differently: with a market observation, a specific number
-  or fact, a hiring signal, a candidate's situation, or a blunt verdict. Every excerpt
-  in a batch must have a different type of opener.
 
 ## Post structure rules
 Every post must have a DIFFERENT internal structure. Do not use the same sequence of
@@ -321,10 +309,7 @@ Do not output the JSON until all checks pass.
 Return ONLY a JSON object with these fields:
 {
   "title": "A punchy, original headline written from our perspective (not copied from the source)",
-  "excerpt": "2–3 sentences teasing our take on the story. Must NOT start with
-             'We've been watching', 'We've noticed', 'We're seeing', or any variation.
-             Vary the opener across the batch — use a sharp market observation, a
-             specific fact, a hiring signal, or a blunt verdict instead.",
+  "excerpt": "2–3 sentences in first person, teasing our take on the story",
   "body": "The full post in HTML format. Use <p> and <strong> tags only. DO NOT use
            <h2> or any subheadings. Write in flowing prose paragraphs — 4 to 6 paragraphs,
            250–400 words total. Write throughout as Wolf Jansen speaking — use 'we', 'our',
@@ -379,18 +364,61 @@ def story_id(entry) -> str:
 # ---------------------------------------------------------------------------
 # HELPERS: pending drafts (stored in OneDrive)
 # ---------------------------------------------------------------------------
+def _download_pending_via_graph() -> dict:
+    """Download pending_approvals.json from OneDrive via Microsoft Graph API.
+    Used in GitHub Actions where there is no local OneDrive sync folder.
+    """
+    import requests as _req
+    tenant = os.getenv("MS_TENANT_ID", "").strip()
+    client = os.getenv("MS_CLIENT_ID", "").strip()
+    secret = os.getenv("MS_CLIENT_SECRET", "").strip()
+    user   = os.getenv("MS_USER_EMAIL", "").strip()
+    if not all([tenant, client, secret, user]):
+        return {}
+    try:
+        token_resp = _req.post(
+            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+            data={"grant_type": "client_credentials", "client_id": client,
+                  "client_secret": secret, "scope": "https://graph.microsoft.com/.default"},
+            timeout=30)
+        token_resp.raise_for_status()
+        access_token = token_resp.json()["access_token"]
+        download_url = (f"https://graph.microsoft.com/v1.0/users/{user}"
+                        f"/drive/root:/NewsBot/pending_approvals.json:/content")
+        resp = _req.get(download_url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            log.info(f"  Downloaded pending_approvals.json from OneDrive ({len(data)} entries).")
+            return data
+        log.warning(f"  Graph download returned {resp.status_code} — starting fresh.")
+        return {}
+    except Exception as e:
+        log.warning(f"  Graph API download failed: {e}")
+        return {}
+
+
 def load_pending() -> dict:
     import shutil
     local = _pending_file_path()
     onedrive = _pending_onedrive_path()
-    # Bootstrap local copy from OneDrive the first time
+    # Bootstrap local copy from OneDrive sync folder (macOS local run)
     if not os.path.exists(local) and onedrive and os.path.exists(onedrive):
         try:
             shutil.copy2(onedrive, local)
             log.info("  Bootstrapped local pending copy from OneDrive.")
         except OSError:
             pass
+    # No local file — try Graph API download (GitHub Actions)
     if not os.path.exists(local):
+        data = _download_pending_via_graph()
+        if data:
+            # Cache locally so subsequent calls in the same run are instant
+            os.makedirs(os.path.dirname(local), exist_ok=True)
+            with open(local, "w") as f:
+                json.dump(data, f, indent=2)
+            return data
         return {}
     try:
         with open(local, "r") as f:
