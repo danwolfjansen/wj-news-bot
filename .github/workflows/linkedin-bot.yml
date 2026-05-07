@@ -55,7 +55,7 @@ jobs:
           # New secrets specific to the LinkedIn flow
           PA_LINKEDIN_APPROVE_URL:  ${{ secrets.PA_LINKEDIN_APPROVE_URL }}
           PA_LINKEDIN_REJECT_URL:   ${{ secrets.PA_LINKEDIN_REJECT_URL }}
-          LINKEDIN_LOOKBACK_DAYS:   "7"
+          LINKEDIN_LOOKBACK_DAYS:   "10"
           LINKEDIN_IGNORE_CONSUMED: ${{ github.event.inputs.ignore_consumed || 'false' }}
           # Auto-injected by Actions; used to commit images via Contents API
           GITHUB_TOKEN:             ${{ secrets.GITHUB_TOKEN }}
