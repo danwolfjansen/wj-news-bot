@@ -308,6 +308,28 @@ These are structural AI tells. Do NOT use them. Rephrase.
     * "It's a clear signal that..."
   Just state what the underlying thing means concretely. Drop the
   meta-frame of calling it a signal.
+- "into the conversation" / "gets you into the conversation" / "gets a
+  candidate into the conversation" — BANNED. This phrase has appeared in
+  multiple consecutive posts and is now a tic. Banned variants:
+    * "These experiences are increasingly what gets you into the conversation."
+    * "...they determine whether a candidate gets into the conversation at all."
+    * "...what gets a CV into the conversation."
+  Replace with a concrete consequence: "These experiences are now a
+  baseline expectation for senior finance briefs." or "Without them, CVs
+  don't make the shortlist."
+- "has moved from X to Y" / "have moved from X to Y" abstract-contrast
+  cadence — same family as the banned "Less about X. More about Y."
+  contrast. Banned variants:
+    * "Technical fluency in AI has moved from emerging skill to baseline requirement."
+    * "AI literacy has moved from differentiator to baseline."
+    * "The brief has moved from generalist to specialist."
+  Just state the current state plainly: "Technical fluency in AI is now a
+  baseline requirement, not an emerging skill." Or describe the change
+  with a concrete time anchor instead of the contrast cadence: "Twelve
+  months ago AI literacy was a differentiator. Today it is assumed."
+  (BUT BEWARE — that example uses the banned then/now contrast, which is
+  also banned. The right answer is to drop the contrast entirely and just
+  state the current state.)
 
 ## What not to do — BANNED WORDS & PHRASES
 - "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
@@ -361,6 +383,11 @@ Scan post_text for:
 15. Hashtags must be lowercase ("#saphiring" not "#SAPHiring"). The trailing
     hashtag line is auto-lowercased post-generation as a safety net, but you
     should still write them lowercase.
+16. "into the conversation" / "gets you/X into the conversation" — banned tic.
+    Rewrite as a concrete consequence ("baseline expectation", "doesn't make
+    the shortlist", etc.).
+17. "has moved from X to Y" / "have moved from X to Y" abstract-contrast —
+    rewrite as a plain statement of the current state.
 If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
@@ -608,6 +635,12 @@ Rewrite the ENTIRE post without ANY of the following:
   - "is a (concrete|clear|important|strong|loud|key|major) signal" / "this
     is a signal" / "that's a signal" framing is banned. Drop the meta-frame
     and state what the underlying event means concretely.
+  - "into the conversation" / "gets you into the conversation" / "gets a
+    candidate into the conversation" — banned tic. Rewrite as a concrete
+    consequence (baseline expectation / doesn't make the shortlist / etc.).
+  - "has moved from X to Y" / "have moved from X to Y" abstract-contrast
+    cadence is banned. State the current state plainly without the contrast
+    ("Technical fluency in AI is now a baseline requirement.").
 If a sentence depends on a contrast or a meta-frame, restructure it so it
 doesn't.
 
@@ -774,6 +807,21 @@ def _detect_banned_patterns(text: str) -> list[str]:
         r"\bIn\s+our\s+[A-Z][A-Za-z&\s]{1,30}\s+practice\b",
     )
     hits += [m.group(0) for m in p_n.finditer(text)]
+
+    # (O) "into the conversation" / "gets you into the conversation" — tic
+    #     that has appeared in multiple consecutive posts. Phrase-level ban.
+    p_o = _re.compile(r"\binto\s+the\s+conversation\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_o.finditer(text)]
+
+    # (P) "has moved from X to Y" / "have moved from X to Y" abstract-contrast
+    #     cadence. Restricted to the present-perfect form ("has/have moved")
+    #     to keep false-positive risk low; literal location moves ("she
+    #     moved from London to Berlin") won't match.
+    p_p = _re.compile(
+        r"\b(?:has|have)\s+moved\s+from\s+[^.?!\n]{2,80}\s+to\s+\w+",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_p.finditer(text)]
 
     return hits
 
