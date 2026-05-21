@@ -243,6 +243,42 @@ These are structural AI tells. Do NOT use them. Rephrase.
     * "The question we're asking is:"
     * "What we're hearing from clients:"
   If you have a question or observation, just state it. No rhetorical throat-clearing.
+- BARE "what we're [seeing/hearing/noticing/watching/learning/finding/observing/telling]"
+  construction, even without the "Here's" prefix. Examples to AVOID:
+    * "In our Financial & Advisory practice, we're seeing boards shift..."
+    * "What we're seeing in DACH boardrooms..."
+    * "We're hearing from CFOs that..."
+    * "What we're noticing right now..."
+  Replace with concrete observations: "Boards in DACH have shifted what they
+  expect from finance leadership." Just state what is the case.
+- The "what makes X worth [watching/noting/paying attention to/heeding]" framing.
+  Banned variants:
+    * "What makes Cisco's move worth watching:"
+    * "What makes this hire notable:"
+    * "What's worth paying attention to here:"
+  Drop the meta-frame. State the point: "Cisco's move is not defensive cost-
+  cutting." Better still, just state the actual observation about Cisco.
+- The REVERSE form of "X isn't Y, it's Z": "X is Z, not Y" / "this is Z, not Y"
+  / "that's Z, not Y" / "it's Z, not Y". Examples to AVOID:
+    * "This is resource reallocation toward AI capability, not defensive cost-cutting."
+    * "It's a strategic move, not a financial one."
+  The reversed ordering is still the same banned contrastive structure. State
+  the assertion without the negated alternative. If the negated alternative
+  matters, give it its own sentence on its own terms.
+- "The question is whether / becomes / we're asking" question-as-statement
+  throat-clearing. Banned variants:
+    * "The question is whether your CV reflects where the market is heading."
+    * "The real question is how quickly DACH boards adapt."
+    * "The question becomes one of timing."
+  If you have a question to put to the reader, just ask it. If it's not really
+  a question, drop the frame and make the assertion.
+- "What's interesting / notable / striking / telling is" and
+  "What stands out is" / "The interesting thing is" — flat thought-leader openers.
+  Banned variants:
+    * "What's interesting is the speed of the shift."
+    * "What stands out is the language Cisco used."
+    * "The interesting thing about this announcement is..."
+  Just describe the speed of the shift / the language / the thing, directly.
 
 ## What not to do — BANNED WORDS & PHRASES
 - "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
@@ -273,11 +309,20 @@ Scan post_text for:
 1. The em-dash character "—" (U+2014) — reject any occurrence.
 2. The en-dash character "–" (U+2013) outside of number ranges — reject.
 3. Any contrastive "not X, (it's|but|rather) Y" construction — rewrite.
-4. The phrases "play out", "playing out", "unfold", "in real time",
-   "worth heeding", "worth noting", "the signal" — rewrite.
-5. Any sentence starting with "Here's the " or "Here's what " or "The question
-   we're asking" — rewrite. These are rhetorical throat-clearing. Just state
-   the point.
+4. The REVERSE form "X is Y, not Z" / "this is Y, not Z" / "that's Y, not Z"
+   / "it's Y, not Z" — same ban, rewrite.
+5. The phrases "play out", "playing out", "unfold", "in real time",
+   "worth heeding", "worth noting", "worth watching", "the signal" — rewrite.
+6. The phrases "we're seeing", "we're hearing", "we're noticing", "we're
+   watching", "we're learning", "we're finding" — rewrite as a direct
+   observation about the underlying reality.
+7. "What makes X worth (watching/noting/paying attention to)" framing —
+   rewrite.
+8. "The question is whether / becomes / we're asking" — rewrite.
+9. "What's interesting/notable/striking/telling is", "What stands out is",
+   "The interesting thing is" — rewrite to a direct statement.
+10. "Increasingly" — banned word, rewrite.
+11. Any sentence starting with "Here's the " or "Here's what " — rewrite.
 If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
@@ -493,9 +538,26 @@ Rewrite the ENTIRE post without ANY of the following:
     a direct observation instead. State the point plainly, no reversal.
   - "not X, (it's|but|rather) Y" within a sentence. Drop the reversal — just
     say what you mean.
+  - "X is Y, not Z" / "this is Y, not Z" / "that's Y, not Z" / "it's Y, not Z"
+    (the REVERSED form of the above ban). Same rule — drop the negated
+    alternative entirely, or give it its own sentence on its own terms.
   - "not just", "not only", "not merely", "not simply" — banned framing.
   - "Less about X. More about Y." paired-sentence contrast — banned.
-If a sentence depends on a contrast, restructure it so it doesn't.
+  - Bare "we're seeing / hearing / noticing / watching / learning / finding"
+    (with or without a "Here's" prefix). State what you observe directly: "DACH
+    boards have shifted what they expect from finance leadership." Not "we're
+    seeing boards shift."
+  - "What makes X worth (watching|noting|paying attention to|heeding)" — drop
+    the meta-frame and state the point about X directly.
+  - "The (real/key/big) question is (whether|...)" / "The question becomes"
+    / "The question we're asking" — no question-as-statement throat-clearing.
+  - "What's interesting/notable/striking/telling is", "What stands out is",
+    "The interesting thing is" — just describe the interesting/notable thing
+    directly without the meta-frame.
+  - "Increasingly" — banned word. Rewrite with a concrete time reference or
+    drop the qualifier entirely.
+If a sentence depends on a contrast or a meta-frame, restructure it so it
+doesn't.
 
 Return JSON only.
 """
@@ -581,6 +643,60 @@ def _detect_banned_patterns(text: str) -> list[str]:
     #     retry decide if it's load-bearing.
     p_e = _re.compile(r"\bThis\s+(?:isn['’]t|is not)\b", _re.IGNORECASE)
     hits += [m.group(0) for m in p_e.finditer(text)]
+
+    # (F) Bare "we're (seeing|hearing|noticing|watching|learning|finding|
+    #     observing|telling)" framing. The existing (E) catches "Here's what
+    #     we're seeing" — this catches the unframed cousin: "In our practice,
+    #     we're seeing boards shift..." etc.
+    p_f = _re.compile(
+        r"\bwe[’']re\s+(?:seeing|hearing|noticing|watching|learning|finding|observing|telling)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_f.finditer(text)]
+
+    # (G) "What makes X worth (watching|noting|paying attention to|heeding)"
+    #     and "what makes X interesting/notable/different/stand out".
+    p_g = _re.compile(
+        r"\bwhat\s+makes\s+[A-Za-z][^.?!\n]{2,80}\s+"
+        r"(?:worth\s+(?:watching|noting|paying|heeding|reading)|"
+        r"interesting|notable|different|stand\s+out|stands?\s+out)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_g.finditer(text)]
+
+    # (H) Reversed contrast: copula + noun phrase + ", not " + noun phrase.
+    #     Catches "this is X, not Y", "it's X, not Y", "that's resource
+    #     reallocation toward AI capability, not defensive cost-cutting".
+    p_h = _re.compile(
+        r"\b(?:is|are|was|were)\s+[a-z][^.?!\n]{2,80},\s+not\s+[a-zA-Z]",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_h.finditer(text)]
+
+    # (I) "The (real|key|big|larger|broader)? question (is|becomes|we're
+    #     asking)" — question-as-statement throat-clearing.
+    p_i = _re.compile(
+        r"\b[Tt]he\s+(?:real\s+|key\s+|big\s+|larger\s+|broader\s+)?question\s+"
+        r"(?:is(?:\s+whether)?|becomes|we[’']re\s+asking)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_i.finditer(text)]
+
+    # (J) "What's (really|particularly)? (interesting|notable|striking|telling)
+    #     is" / "what stands out is" / "the interesting thing is".
+    p_j = _re.compile(
+        r"\bwhat[’']?s\s+(?:really\s+|particularly\s+)?"
+        r"(?:interesting|notable|striking|telling|surprising)\s+is\b"
+        r"|\bwhat\s+stands?\s+out\s+(?:here\s+)?is\b"
+        r"|\bthe\s+interesting\s+thing\s+(?:here\s+)?is\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_j.finditer(text)]
+
+    # (K) "increasingly" — banned in prompt's BANNED WORDS list but the model
+    #     still slips it in. Catch programmatically.
+    p_k = _re.compile(r"\bincreasingly\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_k.finditer(text)]
 
     return hits
 
