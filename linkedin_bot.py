@@ -5,7 +5,7 @@ Runs weekly (Thursdays, 09:00 German time via GitHub Actions).
 
 Looks back over the approved + published stories from the past 7 days,
 asks Claude to pick the single most LinkedIn-worthy one, rewrites it as
-a 150-250 word LinkedIn post in Wolf Jansen company voice, and emails
+a 150–250 word LinkedIn post in Wolf Jansen company voice, and emails
 Dan a preview card with Approve / Reject buttons.
 
 On approval, a dedicated Power Automate flow reads the post text from
@@ -189,9 +189,9 @@ experienced in the German market.
 - Division names exactly: "SAP", "Data & Digital", "Financial & Advisory"
 
 ## LinkedIn format rules
-- Length: 150-250 words. Longer than a tweet, shorter than a blog post.
+- Length: 150–250 words. Longer than a tweet, shorter than a blog post.
 - Open with a hook in the first line — a sharp observation, a question, or a
-  concrete number. No preamble. No "we recently published a post about...".
+  concrete number. No preamble. No "we recently published a post about…".
 - Use short paragraphs — 1 to 3 lines each. LinkedIn readers skim.
 - Keep a line break between paragraphs (blank line).
 - Write in our voice throughout: confident, direct, with a genuine point of view.
@@ -201,7 +201,7 @@ experienced in the German market.
   reference "Read the full take on wolfjansen.com" or similar — only if a
   wp_post_url is provided. If no URL is available, end with a pointed closing
   thought instead (no dangling CTA).
-- 2-4 relevant hashtags on the last line (lowercase, no spaces), e.g.
+- 2–4 relevant hashtags on the last line (lowercase, no spaces), e.g.
   #SAPHiring #DACH #DataEngineering. Never more than 4.
 
 ## What not to do — punctuation
@@ -463,6 +463,59 @@ wp_post_url: {wp_post_url or "(no URL available — omit the 'read more' line)"}
 Rewrite this as a single Wolf Jansen LinkedIn company-page post following
 every rule in the system prompt. Return JSON only.
 """
+    result = _opus_linkedin_call(client, user_message)
+    if not result or not result.get("post_text"):
+        return result
+
+    # Belt-and-braces #1: scrub em/en dashes even if Opus slipped.
+    # Em dash (—, U+2014) and stray en dashes (–, U+2013) are classic AI tells.
+    result["post_text"] = _scrub_dashes(result["post_text"])
+
+    # Belt-and-braces #2: scan for banned rhetorical patterns. If any hit, do
+    # ONE feedback-driven retry pointing the offending fragments out to Opus.
+    # We accept the retry output even if it still has hits — the workflow
+    # should not block on perfect compliance — but we log loudly so we can see
+    # repeat offenders in the Actions output.
+    hits = _detect_banned_patterns(result["post_text"])
+    if hits:
+        log.warning(
+            f"Draft contained {len(hits)} banned rhetorical pattern(s), retrying. "
+            f"Examples: {hits[:5]}"
+        )
+        feedback = "\n".join(f'  - "{h}"' for h in hits[:6])
+        retry_message = user_message + f"""
+
+YOUR PREVIOUS DRAFT VIOLATED THE BAN. These fragments are NOT allowed:
+{feedback}
+
+Rewrite the ENTIRE post without ANY of the following:
+  - "X isn't Y. It's Z." or "X is not Y. It is Z." contrastive hooks. Open with
+    a direct observation instead. State the point plainly, no reversal.
+  - "not X, (it's|but|rather) Y" within a sentence. Drop the reversal — just
+    say what you mean.
+  - "not just", "not only", "not merely", "not simply" — banned framing.
+  - "Less about X. More about Y." paired-sentence contrast — banned.
+If a sentence depends on a contrast, restructure it so it doesn't.
+
+Return JSON only.
+"""
+        retry = _opus_linkedin_call(client, retry_message)
+        if retry and retry.get("post_text"):
+            retry["post_text"] = _scrub_dashes(retry["post_text"])
+            still = _detect_banned_patterns(retry["post_text"])
+            if still:
+                log.warning(
+                    f"Retry STILL contained {len(still)} banned pattern(s): {still[:5]}. "
+                    f"Accepting anyway to avoid blocking the run."
+                )
+            return retry
+        log.warning("Retry call failed — returning original (possibly banned) draft.")
+
+    return result
+
+
+def _opus_linkedin_call(client: anthropic.Anthropic, user_message: str) -> Optional[dict]:
+    """One Opus call → parsed JSON dict (or None on any failure)."""
     try:
         resp = client.messages.create(
             model="claude-opus-4-5-20251101",
@@ -476,15 +529,60 @@ every rule in the system prompt. Return JSON only.
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.rsplit("```", 1)[0].strip()
-        result = json.loads(raw)
-        # Belt-and-braces: scrub em/en dashes even if the model slipped.
-        # Em dash (—, U+2014) and stray en dashes (–, U+2013) are classic AI tells.
-        if isinstance(result, dict) and result.get("post_text"):
-            result["post_text"] = _scrub_dashes(result["post_text"])
-        return result
+        return json.loads(raw)
     except Exception as e:
-        log.error(f"LinkedIn rewrite failed: {e}")
+        log.error(f"Opus LinkedIn call failed: {e}")
         return None
+
+
+def _detect_banned_patterns(text: str) -> list[str]:
+    """Find banned contrastive / rhetorical patterns in LinkedIn post text.
+
+    Returns a list of matched fragments. Empty list means clean. The patterns
+    here mirror the BANNED RHETORICAL PATTERNS section of LINKEDIN_SYSTEM_PROMPT
+    so that prompt drift in Opus 4.5 doesn't silently leak AI tells onto the
+    Wolf Jansen company page.
+    """
+    import re as _re
+    hits: list[str] = []
+
+    # (A) Cross-sentence contrastive hook:  "X isn't Y. It's Z."
+    #     Variants: isn't / is not / aren't / are not / wasn't / was not
+    #     Pivot:    It's / It is / That's / That is / They're / They are / Those are
+    p_a = _re.compile(
+        r"\b(?:isn['’]t|is not|aren['’]t|are not|wasn['’]t|was not)\b"
+        r"[^.?!\n]{1,120}[.?!]\s+"
+        r"(?:It['’]s|It is|That['’]s|That is|They['’]re|They are|Those are)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_a.finditer(text)]
+
+    # (B) In-sentence contrast: "not X, (it's|but|rather|but rather) Y"
+    p_b = _re.compile(
+        r"\bnot\s+[A-Za-z][^,.?!\n]{2,90},\s*"
+        r"(?:it['’]s|it is|but(?:\s+rather)?|rather)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_b.finditer(text)]
+
+    # (C) "not just / not only / not merely / not simply" framing
+    p_c = _re.compile(r"\bnot\s+(?:just|only|merely|simply)\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_c.finditer(text)]
+
+    # (D) "Less about X. More about Y." paired-sentence contrast
+    p_d = _re.compile(
+        r"\bLess\s+about\b[^.?!\n]{1,90}[.?!]\s+More\s+about\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_d.finditer(text)]
+
+    # (E) "This isn't / This is not" sentence opener — almost always a setup
+    #     for a contrast even if the contrast lands later. Flag and let the
+    #     retry decide if it's load-bearing.
+    p_e = _re.compile(r"\bThis\s+(?:isn['’]t|is not)\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_e.finditer(text)]
+
+    return hits
 
 
 def _scrub_dashes(text: str) -> str:
@@ -591,7 +689,24 @@ def _build_story_concepts(entry: dict, count: int,
         "healthcare ops), the briefs MUST show physical operations, not data "
         "centres or chips. \'AI\' in a headline does NOT mean photograph a "
         "chip — read the story body.\n\n"
+        "MODERN SUBJECT RULE — if the story is about SOFTWARE work (SAP, ERP, "
+        "AI agents, autonomous spend, autonomous procurement, automated "
+        "workflows, cloud migration, AI in finance/HR/procurement, RPA, "
+        "compliance tech, audit tech, or any modern knowledge-work topic), "
+        "the briefs MUST depict MODERN KNOWLEDGE WORK as it actually looks "
+        "in a 2026 enterprise. Good subjects: a procurement professional at "
+        "a multi-monitor workstation (screens out of focus or angled away to "
+        "avoid logos), a buyer at a tablet reviewing supplier data, a goods-"
+        "receiving bay with a handheld scanner in use, a modern open-plan "
+        "finance floor at golden hour, a SAP user-group room with monitors "
+        "showing dashboards (no readable text), a supplier negotiation across "
+        "a meeting-room table with anonymous participants. The scene should "
+        "look like 2026, not 1995.\n\n"
         "HARD BANS — never propose:\n"
+        "  - Filing cabinets, paper folders, paper invoices stacked, ring "
+        "binders, rubber stamps, fax machines, dot-matrix printers, beige "
+        "metal office furniture, paper desk trays — any 1990s clerical "
+        "imagery. Modern procurement and finance do NOT look like this.\n"
         "  - A figure walking into a vanishing point (corridor, server aisle, "
         "tunnel — any receding-figure perspective shot).\n"
         "  - A GPU or graphics card isolated on a desk.\n"
@@ -600,13 +715,14 @@ def _build_story_concepts(entry: dict, count: int,
         "  - A lone server rack glowing blue (unless the story is literally "
         "about data-centre infrastructure).\n"
         "  - Hands on keyboard with code overlay, empty boardrooms, city "
-        "skylines, abstract geometric compositions.\n\n"
+        "skylines, abstract geometric compositions.\n"
+        "  - Hands stamping documents at a desk piled with paperwork.\n\n"
         "CONSTRAINTS:\n"
         "  - Anonymous people only (from behind, in profile, face obscured, "
         "or at a distance).\n"
         "  - No readable logos or brand names.\n"
         "  - Equipment category, not specific named product.\n\n"
-        "WORKED EXAMPLE — Story: \'Maersk diverts around the Red Sea, "
+        "WORKED EXAMPLE A — Story: \'Maersk diverts around the Red Sea, "
         "freight rates rise.\' Subjects: container ship, quayside, gantry "
         "crane, stacked containers, dockworker. 3 briefs: (1) A stacked "
         "container ship hull seen from water level at dawn, shallow focus on "
@@ -614,6 +730,17 @@ def _build_story_concepts(entry: dict, count: int,
         "dusk sky, empty quayside in the foreground. (3) Stacked containers "
         "at golden hour from a low angle, a hi-vis dockworker from behind at "
         "the edge of frame.\n\n"
+        "WORKED EXAMPLE B — Story: \'SAP rolls out autonomous spend "
+        "management, procurement teams adapt.\' Subjects: procurement "
+        "workstation, supplier meeting room, goods-receiving bay, finance "
+        "open-plan floor, buyer with tablet. 3 briefs: (1) Anonymous "
+        "procurement specialist at a triple-monitor workstation seen from "
+        "behind, monitors angled away from camera, soft window light from "
+        "the right. (2) A buyer in profile holding a tablet beside floor-to-"
+        "ceiling office windows, shallow depth of field, modern open-plan "
+        "interior behind. (3) Two figures across a meeting-room table seen "
+        "from the side, one gesturing toward a wall-mounted screen, late-"
+        "afternoon light, no readable text on the screen.\n\n"
         "Now do the same for this story.\n\n"
         "Story title: " + title + "\n"
         "Story excerpt: " + excerpt + "\n\n"
@@ -639,7 +766,14 @@ def _build_story_concepts(entry: dict, count: int,
             "Each brief: ONE sentence, 15-25 words, one concrete subject "
             "drawn from the story, one lighting note, one framing note. "
             "Anonymous people only. No logos. No corridors with receding "
-            "figures. No isolated GPUs. No wafers. No skylines.\n\n"
+            "figures. No isolated GPUs. No wafers. No skylines. NO 1990s "
+            "clerical imagery (no filing cabinets, no rubber stamps, no "
+            "paper invoices, no fax machines, no hands-stamping-documents "
+            "scenes). If the story is about software, SAP, AI, or "
+            "procurement automation, depict MODERN knowledge work: a "
+            "multi-monitor workstation, a tablet on a modern desk, a "
+            "supplier meeting in a glass-walled meeting room, a goods-"
+            "receiving bay with handheld scanners — 2026, not 1995.\n\n"
             "Story title: " + title + "\n"
             "Story excerpt: " + excerpt + "\n\n"
             "Return ONLY JSON: {\"scenes\": [\"...\", \"...\"" +
