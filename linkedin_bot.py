@@ -279,6 +279,35 @@ These are structural AI tells. Do NOT use them. Rephrase.
     * "What stands out is the language Cisco used."
     * "The interesting thing about this announcement is..."
   Just describe the speed of the shift / the language / the thing, directly.
+- "In our [Division] practice..." as an opener is BANNED. We have used this
+  far too often and it has become a tic. Banned variants:
+    * "In our SAP practice, client requirements have shifted."
+    * "In our Financial & Advisory practice, we're seeing boards shift..."
+    * "In our Data & Digital practice..."
+  Open with the underlying observation directly. Examples of good openers:
+    * "DACH SAP clients have shifted what they look for in consultants."
+    * "Demand for consultants who can govern AI inside traditional SAP
+      environments will rise."
+    * "Across the senior finance roles we cover, the brief has shifted."
+  If you need to reference Wolf Jansen's vantage point at all, do it later
+  in the post and in a different shape (concrete proof: "Across 50+ SAP
+  placements this year..." / geographic anchor: "Across DACH SAP roles...").
+- "[Time] ago, X. Now, Y." or "[Time] ago, X. Today, Y." then/now contrast
+  structure. Banned variants:
+    * "Twelve months ago, AI experience was a nice-to-have. Now it moves up the list."
+    * "A year ago, this was niche. Today, it's mainstream."
+    * "Two years ago, X. Now Y."
+  Same cadence as "Less about X. More about Y." — banned. If a then/now
+  comparison is genuinely load-bearing, use a single sentence with concrete
+  detail: "AI experience moved from buried nice-to-have to top-three brief
+  requirement over the past twelve months."
+- "is a [adjective] signal" / "this is a signal" / "that's a signal that"
+  framing — same family as the existing "the signal is..." ban. Banned variants:
+    * "For SAP hiring, this is a concrete signal."
+    * "That's an important signal for the talent market."
+    * "It's a clear signal that..."
+  Just state what the underlying thing means concretely. Drop the
+  meta-frame of calling it a signal.
 
 ## What not to do — BANNED WORDS & PHRASES
 - "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
@@ -323,6 +352,15 @@ Scan post_text for:
    "The interesting thing is" — rewrite to a direct statement.
 10. "Increasingly" — banned word, rewrite.
 11. Any sentence starting with "Here's the " or "Here's what " — rewrite.
+12. "In our [Division] practice..." as an opener — rewrite. We've used this
+    construction too many times. Open with the underlying observation directly.
+13. "[Time] ago, X. Now Y." then/now contrast — rewrite as a single sentence
+    or drop the comparison.
+14. "is a (concrete|clear|important|strong|loud|key|major) signal" or "this
+    is a signal" — rewrite without the meta-frame.
+15. Hashtags must be lowercase ("#saphiring" not "#SAPHiring"). The trailing
+    hashtag line is auto-lowercased post-generation as a safety net, but you
+    should still write them lowercase.
 If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
@@ -556,6 +594,20 @@ Rewrite the ENTIRE post without ANY of the following:
     directly without the meta-frame.
   - "Increasingly" — banned word. Rewrite with a concrete time reference or
     drop the qualifier entirely.
+  - "In our [Division] practice..." as an opener — banned. We've used this
+    construction too many times. Open with the underlying observation
+    directly. Examples of good openers: "DACH SAP clients have shifted
+    what they look for in consultants." / "Demand for AI-fluent CFOs has
+    moved up the brief." If you must reference WJ's vantage point, do it
+    later in the post and in a different shape ("Across 50+ SAP placements
+    this year...").
+  - "[Time] ago, X. Now Y." or "[Time] ago, X. Today Y." then/now contrast
+    is banned. Same cadence as "Less about X. More about Y." If a then/now
+    comparison is genuinely needed, fold it into a single sentence with
+    concrete detail.
+  - "is a (concrete|clear|important|strong|loud|key|major) signal" / "this
+    is a signal" / "that's a signal" framing is banned. Drop the meta-frame
+    and state what the underlying event means concretely.
 If a sentence depends on a contrast or a meta-frame, restructure it so it
 doesn't.
 
@@ -698,20 +750,54 @@ def _detect_banned_patterns(text: str) -> list[str]:
     p_k = _re.compile(r"\bincreasingly\b", _re.IGNORECASE)
     hits += [m.group(0) for m in p_k.finditer(text)]
 
+    # (L) "is a (concrete|clear|loud|strong|important|key|major) signal" —
+    #     same family as the existing "the signal is..." ban. Catches noun-
+    #     form variants the prompt doesn't already cover.
+    p_l = _re.compile(
+        r"\b(?:is|are|that[’']s|this\s+is|it[’']s)\s+(?:a|an)\s+(?:\w+\s+)?signal\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_l.finditer(text)]
+
+    # (M) "[Time] ago, X. Now/Today Y." then/now contrast structure.
+    p_m = _re.compile(
+        r"\b\w+\s+(?:months?|years?|quarters?|weeks?|decades?)\s+ago\b"
+        r"[^.?!\n]{1,120}[.?!]\s+(?:Now|Today)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_m.finditer(text)]
+
+    # (N) "In our [X] practice" opener — overused WJ-positioning tic. Catches
+    #     "In our SAP practice", "In our Financial & Advisory practice",
+    #     "In our Data & Digital practice", etc.
+    p_n = _re.compile(
+        r"\bIn\s+our\s+[A-Z][A-Za-z&\s]{1,30}\s+practice\b",
+    )
+    hits += [m.group(0) for m in p_n.finditer(text)]
+
     return hits
 
 
 def _scrub_dashes(text: str) -> str:
-    """Replace em dashes with commas and bare en dashes with hyphens."""
+    """Replace em dashes with commas, en dashes with hyphens, lowercase hashtags.
+
+    The function name is kept for backwards compatibility but it now does
+    multiple cosmetic fixes that the model intermittently gets wrong even
+    when the prompt forbids them.
+    """
+    import re as _re
     # Em dash: " — " → ", " (with or without spaces)
     text = text.replace(" — ", ", ")
     text = text.replace("—", ",")
     # En dash: keep inside number ranges like "12-18", otherwise strip
     # Simple rule: if flanked by digits, convert to hyphen; else to comma
-    import re as _re
     text = _re.sub(r"(\d)\s*–\s*(\d)", r"\1-\2", text)
     text = text.replace(" – ", ", ")
     text = text.replace("–", ",")
+    # Lowercase every hashtag in the body. Opus intermittently PascalCases
+    # them ("#SAPHiring") even when the prompt asks for lowercase. The
+    # rule is unambiguous so a programmatic fix is cleaner than a retry.
+    text = _re.sub(r"#(\w+)", lambda m: "#" + m.group(1).lower(), text)
     return text
 
 
@@ -725,7 +811,14 @@ _IMAGE_STYLE_TEMPLATE = (
     "Documentary editorial photograph. {concept} "
     "Natural available light, full-frame camera, prime lens, journalistic "
     "framing. Any person in frame is anonymous (from behind, in profile, "
-    "face obscured, or at a distance). No readable logos or brand names."
+    "face obscured, or at a distance). No readable logos or brand names. "
+    "NO VISIBLE TEXT anywhere in the image: no words, numbers, chart "
+    "labels, button labels, UI labels, sticker text, or signage on any "
+    "screen, tablet, document, sticky note, whiteboard, lanyard, or "
+    "surface. Any document on a desk is too out-of-focus to read. Screens "
+    "either show abstract data visualisations without labels, or are "
+    "angled away from camera. Text rendering is a known weakness of "
+    "image models — eliminating it prevents misspellings."
 )
 
 
