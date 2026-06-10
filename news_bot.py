@@ -158,6 +158,9 @@ and are focused on the German market.
 - Say "passive candidates" or "passive talent". This is central to our positioning
 - Say "specialist recruitment". Never "staffing" or "temp agency"
 - Say "consultants", not "recruiters" when referring to our team
+- Say "company" / "companies". NEVER "firm" or "firms" in any context
+  (including "mid-market firm", "the firms getting the most", or our own
+  description). Use "company", "business", "organisation", or "employer".
 - Division names exactly: "SAP", "Data & Digital", "Financial & Advisory"
 
 ## Voice and tone
@@ -186,12 +189,35 @@ These phrases make content sound machine-generated. Avoid all of them.
   like "12-18 months". Never as a sentence break.
 
 ### Banned rhetorical patterns (structural tells)
-- The contrastive "not X, it's Y" / "this isn't X, it's Y" / "not X — it's Y"
-  construction in any variation. Examples to avoid:
-    * "That's not a criticism, it's a gap..."
-    * "This isn't about X, it's about Y..."
-    * "It's not just X, it's Y..."
-  State the point directly. Don't do the rhetorical reversal.
+- The contrastive reversal in EVERY form, not only "not X, it's Y". This is the
+  tell that keeps slipping through, so treat it broadly. Banned variations:
+    * "not X, it's Y": "That's not a criticism, it's a gap..."
+    * "this isn't X, it's Y": "This isn't about X, it's about Y..."
+    * "not just X, (it's) Y": "not just those who can configure the software"
+    * "X, not Y" noun contrast: "context, not raw data, is the asset"
+    * "no longer X, (it's/but/they're) Y": "the question is no longer X but Y",
+      "recruitment tech is no longer a back-office afterthought, it is..."
+    * "necessary but not sufficient" / "X remains necessary, but no longer enough"
+      / "X alone is not enough"
+    * "on the surface X, but Y": "On the surface this is a vendor story, but..."
+    * "shifted/changed rather than Y": "the load has shifted rather than shrunk"
+  State the affirmative point directly. Never define something by what it is not.
+- Short punchy fragment tells. One-line "profound" sentences a LinkedIn guru
+  would isolate for effect. Banned examples and their shape:
+    * "It works until it doesn't."
+    * "The intercompany mess is a symptom."
+    * "That framing matters." / "The code was never the hard part."
+    * "The cracks show fast."
+    * "X is a litmus test for whether..."
+    * Parallel two-fragment pairs: "AI handles the coordination. Senior talent handles the judgement."
+  Fold the point into a normal sentence with concrete content.
+- "For [audience], the implication is clear" / "the implication is clear" /
+  "the takeaway is clear" / "the lesson is clear" sign-offs. State the
+  implication itself, do not announce that one exists.
+- Vague "we are already seeing it" demand-signal filler:
+    * "We are already fielding briefs that reflect this shift"
+    * "mandates / briefs / requests that reflect this shift"
+  Name the concrete role, skill, or client behaviour we are actually seeing.
 - "Playing out" / "unfolding" / "in real time" meta-narration:
     * "We're seeing this play out in real time"
     * "Watching this shift unfold"
@@ -297,7 +323,16 @@ into a paragraph).
 Then also check:
 - Em-dash "—" anywhere. Replace with a comma, colon, or rephrase.
 - En-dash "–" outside number ranges. Remove.
-- Contrastive "not X, it's Y" constructions. Rewrite.
+- Contrastive reversal in ANY form: "not X, it's Y", "not just X", "X, not Y",
+  "no longer X (but/it's/they're) Y", "necessary but not sufficient",
+  "X alone is not enough", "on the surface ... but", "rather than". Rewrite.
+- Short fragment tells: "until it doesn't", "is a symptom", "framing matters",
+  "the cracks show", "is a litmus test", "was never the hard part". Rewrite into
+  full sentences with concrete content.
+- "the implication is clear", "the takeaway is clear", "for X the implication is
+  clear". Rewrite to state the implication itself.
+- "fielding briefs", "reflect(s) this shift". Replace with concrete specifics.
+- The word "firm" or "firms" anywhere. Replace with "company"/"companies".
 - Phrases: "play out", "unfold", "in real time", "worth noting", "the signal",
   "Here's the", "Here's what", "12 to 18 months" appearing more than once across
   the batch. Rewrite.
@@ -765,29 +800,30 @@ Summary / extract:
 Please rewrite this as an original Wolf Jansen commentary post. Remember to end
 the body with a link back to the original source at {story['link']}.
 """
+    messages = [{"role": "user", "content": user_message}]
     try:
-        response = client.messages.create(
-            model="claude-opus-4-5-20251101",
-            max_tokens=1024,
-            system=REWRITE_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}]
-        )
-        raw = response.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        result = json.loads(raw)
-        # Belt-and-braces: scrub em/en dashes from all text fields even if
-        # the model slipped. Em dash (—, U+2014) is the biggest AI tell.
-        if isinstance(result, dict):
-            for field in ("title", "excerpt", "body"):
-                if result.get(field) and isinstance(result[field], str):
-                    result[field] = _scrub_dashes(result[field])
-            # Strip all <h2> subheadings from body regardless of prompt compliance.
-            if result.get("body"):
-                result["body"] = _strip_subheadings(result["body"])
+        result = _generate_parse_clean(client, messages)
+        if result is None:
+            return None
+        # Programmatic safety net: the system prompt is not always obeyed, so we
+        # scan the parsed draft for AI writing tells. If any fire, send ONE
+        # corrective re-prompt quoting the offences and keep the cleaner draft.
+        tells = _detect_ai_tells(result)
+        if tells:
+            log.warning(
+                f"  AI-tell patterns in draft of '{story['title']}': {tells} "
+                f"— requesting one corrective rewrite"
+            )
+            try:
+                messages.append({"role": "assistant", "content": json.dumps(result)})
+                messages.append({"role": "user", "content": _build_correction_message(tells)})
+                retry = _generate_parse_clean(client, messages)
+                if retry is not None and len(_detect_ai_tells(retry)) <= len(tells):
+                    result = retry
+                else:
+                    log.warning("  Corrective rewrite no better, keeping first draft")
+            except Exception as e:
+                log.warning(f"  Corrective rewrite failed ({e}); keeping first draft")
         # Hard-reject banned headline patterns and regenerate title only.
         if isinstance(result, dict) and result.get("title"):
             result["title"] = _enforce_headline(result["title"], story, client)
@@ -795,6 +831,33 @@ the body with a link back to the original source at {story['link']}.
     except Exception as e:
         log.error(f"  Rewrite failed for '{story['title']}': {e}")
         return None
+
+
+def _generate_parse_clean(client: anthropic.Anthropic, messages: list) -> Optional[dict]:
+    """Call the model, strip code fences, parse JSON, then scrub dashes,
+    enforce company-over-firm, and strip subheadings on all text fields."""
+    response = client.messages.create(
+        model="claude-opus-4-5-20251101",
+        max_tokens=1024,
+        system=REWRITE_SYSTEM_PROMPT,
+        messages=messages,
+    )
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
+    result = json.loads(raw)
+    if isinstance(result, dict):
+        for field in ("title", "excerpt", "body"):
+            if result.get(field) and isinstance(result[field], str):
+                result[field] = _scrub_dashes(result[field])
+                result[field] = _swap_firm_for_company(result[field])
+        # Strip all <h2> subheadings from body regardless of prompt compliance.
+        if result.get("body"):
+            result["body"] = _strip_subheadings(result["body"])
+    return result
 
 
 def _strip_subheadings(html: str) -> str:
@@ -808,6 +871,95 @@ def _strip_subheadings(html: str) -> str:
     # Clean up any double blank lines left behind
     html = _re.sub(r"(\s*<p>\s*</p>)+", "", html)
     return html.strip()
+
+
+def _swap_firm_for_company(text: str) -> str:
+    """House style: use 'company'/'companies', never 'firm'/'firms'.
+    Preserves case and possessives; word boundaries leave 'confirm',
+    'firmware', 'firmly', 'infirmary' untouched."""
+    import re as _re
+    def _f(mm):
+        w = mm.group(0)
+        base = "companies" if w.lower() == "firms" else "company"
+        if w.isupper():
+            return base.upper()
+        if w[0].isupper():
+            return base[0].upper() + base[1:]
+        return base
+    return _re.sub(r"\bfirms?\b", _f, text, flags=_re.IGNORECASE)
+
+
+# Patterns that mark machine-generated prose. Kept deliberately broad on the
+# contrastive-reversal family, which repeatedly slips past the prompt.
+_AI_TELL_PATTERNS = [
+    ("contrastive 'not just X'",            r"\bnot just\b"),
+    ("contrastive 'X, not Y'",              r",\s+not\s+(?:a |an |the |just )?\w+"),
+    ("contrastive \"isn't X, it's Y\"",     r"\bis(?:n't| not)\b[^.!?]*,\s*(?:it'?s|its|but|rather)\b"),
+    ("contrastive 'no longer X but/it's Y'", r"\bno longer\b[^.!?]*\b(?:but|it'?s|its|they'?re|rather)\b"),
+    ("'no longer sufficient/enough'",       r"\bno longer\s+(?:sufficient|enough|adequate)\b"),
+    ("'not sufficient/enough' (necessary-but)", r"\b(?:not sufficient|alone is not enough)\b"),
+    ("'on the surface ... but'",            r"\bon the surface\b"),
+    ("'shifted/changed rather than'",       r"\b(?:shifted|changed|moved)\s+rather than\b"),
+    ("fragment \"until it doesn't\"",       r"until it doesn'?t"),
+    ("fragment 'is a symptom'",             r"\bis a symptom\b"),
+    ("fragment 'litmus test'",              r"\blitmus test\b"),
+    ("fragment 'the cracks show'",          r"\bthe cracks show\b"),
+    ("fragment 'framing matters'",          r"\bframing matters\b"),
+    ("fragment 'was never the hard part'",  r"\bwas never the (?:hard part|main constraint)\b"),
+    ("'the (underlying|real) question is'", r"\bthe (?:underlying |real )?question (?:is|becomes)\b"),
+    ("'the implication/takeaway is clear'", r"\bthe (?:implication|takeaway|lesson|message)s? (?:is|are|here is) clear\b"),
+    ("filler 'fielding briefs/mandates'",   r"\bfielding\s+(?:briefs?|mandates?|requests?)\b"),
+    ("filler 'reflect(s) this shift'",      r"\breflect(?:s|ing)?\s+this\s+shift\b"),
+    ("meta 'play(ing) out'",                r"\bplay(?:ing)? out\b"),
+    ("meta 'unfold'",                       r"\bunfold(?:s|ing)?\b"),
+    ("meta 'in real time'",                 r"\bin real time\b"),
+    ("'worth noting/heeding'",              r"\bworth (?:noting|heeding|paying attention)\b"),
+    ("'the signal'",                        r"\bthe signal\b"),
+    ("\"Here's the/what\"",                 r"here'?s (?:the|what)\b"),
+    ("'firm'/'firms'",                      r"\bfirms?\b"),
+    ("em dash leak",                        r"—"),
+]
+
+
+def _detect_ai_tells(result: dict) -> list:
+    """Return labels of any banned AI writing patterns found in the draft."""
+    import re as _re
+    if not isinstance(result, dict):
+        return []
+    parts = [result.get(f) for f in ("title", "excerpt", "body")
+             if isinstance(result.get(f), str)]
+    text = " ".join(parts)
+    text = _re.sub(r"<[^>]+>", " ", text)   # strip HTML tags
+    text = _re.sub(r"\s+", " ", text)       # normalise whitespace
+    found = []
+    for label, pat in _AI_TELL_PATTERNS:
+        if _re.search(pat, text, _re.IGNORECASE):
+            found.append(label)
+    return found
+
+
+def _build_correction_message(tells: list) -> str:
+    """Build a corrective re-prompt listing the detected tells."""
+    bullet_list = "\n".join(f"  - {t}" for t in tells)
+    return (
+        "Your draft still contains AI writing tells that are banned in the Wolf "
+        "Jansen style guide. These patterns were detected:\n"
+        f"{bullet_list}\n\n"
+        "Rewrite the post to remove ALL of them. Specifically:\n"
+        "- Never define something by what it is not. Banned in every form: "
+        "\"not X, it's Y\", \"X, not Y\", \"no longer X but Y\", \"not just X\", "
+        "\"necessary but not sufficient\", \"on the surface ... but\". Make each "
+        "point as a direct affirmative statement.\n"
+        "- Remove short one-line 'profound' fragments (\"It works until it "
+        "doesn't\", \"X is a symptom\", \"that framing matters\"). Fold the point "
+        "into a normal sentence.\n"
+        "- Never write \"the implication is clear\" / \"the takeaway is clear\"; "
+        "state the implication itself.\n"
+        "- Use \"company\"/\"companies\", never \"firm\"/\"firms\".\n"
+        "Keep the same facts, division, length (250-400 words), prose-only format "
+        "(no subheadings), and the italic source credit line. Return ONLY the JSON "
+        "object in the same format."
+    )
 
 
 def _scrub_dashes(text: str) -> str:
