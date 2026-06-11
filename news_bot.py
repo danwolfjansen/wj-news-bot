@@ -260,6 +260,25 @@ These phrases make content sound machine-generated. Avoid all of them.
 - Repeated phrases across posts: Never use the same subheading, sentence opener, or
   closing thought more than once across all posts in a single batch.
 
+### More tells from the Wolf Jansen Anti-AI Writing Style guide
+These follow the house "ANTI AI WRITING STYLE" guide. Avoid all of them:
+- Negative parallelism in any form: "not only X but Y", "not X, but Y",
+  "no longer X, it's Y", "X, not Y". State the affirmative point directly.
+- Rule of three: stop reaching for three-item lists ("keynotes, panels, and
+  networking"; "adjective, adjective, adjective"). Use the number of items the
+  point actually needs.
+- False ranges: no figurative "from X to Y" unless X and Y are real ends of one
+  scale. "from configuration to strategy" is a false range, cut it.
+- AI-vocabulary words: leverage, delve, tapestry, vibrant, seamless, garner,
+  foster, showcase, intricate, realm, navigate (figurative), underpin, myriad,
+  bespoke, robust, pivotal, underscore, highlight (as a verb).
+- Meta-narration: "in real time" / "in real-time", "we are watching", "playing
+  out", "unfolding", "the signal is", "the real question is whether".
+- Section-summary openers: "In summary", "In conclusion", "Overall".
+- Didactic disclaimers: "it's important to note", "it's worth noting".
+- Present-participle tails that tack on significance: ", highlighting that...",
+  ", underscoring how...", ", reflecting the...", ", signalling that...".
+
 ## Post structure rules
 Every post must have a DIFFERENT internal structure. Do not use the same sequence of
 sections across posts in the same batch. Some structures that work:
@@ -809,21 +828,28 @@ the body with a link back to the original source at {story['link']}.
         # scan the parsed draft for AI writing tells. If any fire, send ONE
         # corrective re-prompt quoting the offences and keep the cleaner draft.
         tells = _detect_ai_tells(result)
-        if tells:
+        attempts = 0
+        while tells and attempts < 2:
+            attempts += 1
             log.warning(
-                f"  AI-tell patterns in draft of '{story['title']}': {tells} "
-                f"— requesting one corrective rewrite"
+                f"  AI-tell patterns in draft of '{story['title']}' "
+                f"(attempt {attempts}): {tells} — requesting corrective rewrite"
             )
             try:
                 messages.append({"role": "assistant", "content": json.dumps(result)})
                 messages.append({"role": "user", "content": _build_correction_message(tells)})
                 retry = _generate_parse_clean(client, messages)
-                if retry is not None and len(_detect_ai_tells(retry)) <= len(tells):
-                    result = retry
-                else:
-                    log.warning("  Corrective rewrite no better, keeping first draft")
             except Exception as e:
-                log.warning(f"  Corrective rewrite failed ({e}); keeping first draft")
+                log.warning(f"  Corrective rewrite failed ({e}); keeping previous draft")
+                break
+            if retry is None:
+                break
+            retry_tells = _detect_ai_tells(retry)
+            if len(retry_tells) < len(tells):
+                result, tells = retry, retry_tells   # accept the cleaner draft
+            else:
+                log.warning("  Corrective rewrite no cleaner, keeping previous draft")
+                break
         # Hard-reject banned headline patterns and regenerate title only.
         if isinstance(result, dict) and result.get("title"):
             result["title"] = _enforce_headline(result["title"], story, client)
@@ -889,35 +915,65 @@ def _swap_firm_for_company(text: str) -> str:
     return _re.sub(r"\bfirms?\b", _f, text, flags=_re.IGNORECASE)
 
 
-# Patterns that mark machine-generated prose. Kept deliberately broad on the
-# contrastive-reversal family, which repeatedly slips past the prompt.
+# Patterns that mark machine-generated prose, aligned to Wolf Jansen's
+# "ANTI AI WRITING STYLE" guide (the Wikipedia "Signs of AI writing" field
+# guide). Grouped by the guide's sections. Each hit triggers a corrective
+# rewrite, not a hard reject, so broad coverage is acceptable.
 _AI_TELL_PATTERNS = [
-    ("contrastive 'not just X'",            r"\bnot just\b"),
-    ("contrastive 'X, not Y'",              r",\s+not\s+(?:a |an |the |just )?\w+"),
-    ("contrastive \"isn't X, it's Y\"",     r"\bis(?:n't| not)\b[^.!?]*,\s*(?:it'?s|its|but|rather)\b"),
-    ("contrastive 'no longer X but/it's Y'", r"\bno longer\b[^.!?]*\b(?:but|it'?s|its|they'?re|rather)\b"),
-    ("'no longer sufficient/enough'",       r"\bno longer\s+(?:sufficient|enough|adequate)\b"),
-    ("'not sufficient/enough' (necessary-but)", r"\b(?:not sufficient|alone is not enough)\b"),
-    ("'on the surface ... but'",            r"\bon the surface\b"),
-    ("'shifted/changed rather than'",       r"\b(?:shifted|changed|moved)\s+rather than\b"),
-    ("fragment \"until it doesn't\"",       r"until it doesn'?t"),
-    ("fragment 'is a symptom'",             r"\bis a symptom\b"),
-    ("fragment 'litmus test'",              r"\blitmus test\b"),
-    ("fragment 'the cracks show'",          r"\bthe cracks show\b"),
-    ("fragment 'framing matters'",          r"\bframing matters\b"),
-    ("fragment 'was never the hard part'",  r"\bwas never the (?:hard part|main constraint)\b"),
-    ("'the (underlying|real) question is'", r"\bthe (?:underlying |real )?question (?:is|becomes)\b"),
-    ("'the implication/takeaway is clear'", r"\bthe (?:implication|takeaway|lesson|message)s? (?:is|are|here is) clear\b"),
-    ("filler 'fielding briefs/mandates'",   r"\bfielding\s+(?:briefs?|mandates?|requests?)\b"),
-    ("filler 'reflect(s) this shift'",      r"\breflect(?:s|ing)?\s+this\s+shift\b"),
-    ("meta 'play(ing) out'",                r"\bplay(?:ing)? out\b"),
-    ("meta 'unfold'",                       r"\bunfold(?:s|ing)?\b"),
-    ("meta 'in real time'",                 r"\bin real time\b"),
-    ("'worth noting/heeding'",              r"\bworth (?:noting|heeding|paying attention)\b"),
-    ("'the signal'",                        r"\bthe signal\b"),
-    ("\"Here's the/what\"",                 r"here'?s (?:the|what)\b"),
-    ("'firm'/'firms'",                      r"\bfirms?\b"),
-    ("em dash leak",                        r"—"),
+    # --- Negative parallelisms / contrastive reversals (guide: AIPARALLEL) ---
+    ("neg-parallel 'not just X'",            r"\bnot just\b"),
+    ("neg-parallel 'not only X but'",        r"\bnot only\b[^.!?]*\bbut\b"),
+    ("neg-parallel 'X, not Y'",              r",\s+not\s+(?:a |an |the |just )?\w+"),
+    ("neg-parallel \"isn't X, it's Y\"",     r"\bis(?:n't| not)\b[^.!?]*,\s*(?:it'?s|its|but|rather)\b"),
+    ("neg-parallel 'no longer X but/it's Y'", r"\bno longer\b[^.!?]*\b(?:but|it'?s|its|they'?re|rather)\b"),
+    ("'no longer sufficient/enough'",        r"\bno longer\s+(?:sufficient|enough|adequate)\b"),
+    ("'not sufficient / alone is not enough'", r"\b(?:not sufficient|alone is not enough)\b"),
+    ("'on the surface ... but'",             r"\bon the surface\b"),
+    ("'shifted/changed rather than'",        r"\b(?:shifted|changed|moved|grown)\s+rather than\b"),
+    # --- Short 'profound' fragment tells ---
+    ("fragment \"until it doesn't\"",        r"until it doesn'?t"),
+    ("fragment 'is a symptom'",              r"\bis a symptom\b"),
+    ("fragment 'litmus test'",               r"\blitmus test\b"),
+    ("fragment 'the cracks show'",           r"\bthe cracks show\b"),
+    ("fragment 'framing matters'",           r"\bframing matters\b"),
+    ("fragment 'was never the hard part'",   r"\bwas never the (?:hard part|main constraint|point)\b"),
+    # --- Rhetorical setups / meta-narration ---
+    ("'the (real/underlying) question is'",  r"\bthe (?:underlying |real )?question\b[^.!?]{0,90}\bis\b"),
+    ("'the implication/takeaway is clear'",  r"\bthe (?:implication|takeaway|lesson|message)s? (?:is|are|here is) clear\b"),
+    ("\"Here's the/what\"",                  r"here'?s (?:the|what)\b"),
+    ("meta 'play(ing) out'",                 r"\bplay(?:ing|ed)? out\b"),
+    ("meta 'unfold'",                        r"\bunfold(?:s|ing|ed)?\b"),
+    ("meta 'in real time'",                  r"\bin real[\s-]?time\b"),
+    ("meta 'we are watching'",               r"\bwe(?:'re| are) watching\b"),
+    ("'the/clear signal'",                   r"\bthe signal\b|\bclear signal\b"),
+    # --- Filler demand-signal ---
+    ("filler 'fielding briefs/mandates'",    r"\bfielding\s+(?:briefs?|mandates?|requests?)\b"),
+    ("filler 'reflect(s) this shift'",       r"\breflect(?:s|ing)?\s+this\s+shift\b"),
+    # --- Significance / legacy puffery (guide: Undue emphasis) ---
+    ("puffery 'stands/serves as'",           r"\b(?:stands|serves)\s+as\b"),
+    ("puffery 'is a testament/reminder'",    r"\bis a (?:testament|reminder)\b"),
+    ("puffery 'underscores/highlights'",     r"\b(?:underscore|underscores|underscoring|highlights|highlighting)\b"),
+    ("puffery 'pivotal/turning point'",      r"\b(?:pivotal|key turning point)\b"),
+    ("puffery 'evolving landscape'",         r"\bevolving landscape\b"),
+    ("puffery 'marks a shift'",              r"\bmarks? a shift\b"),
+    ("puffery 'setting the stage'",          r"\bsetting the stage\b"),
+    # --- Superficial present-participle tails (guide: Superficial analyses) ---
+    ("participle tail ', -ing'",             r",\s*(?:highlighting|underscoring|emphasi[sz]ing|reflecting|symboli[sz]ing|signal(?:l)?ing|ensuring|fostering|demonstrating|showcasing|cementing|solidifying|reinforcing)\b"),
+    # --- Vague attribution (guide: AIWEASEL) ---
+    ("vague attribution",                    r"\b(?:industry reports?|observers (?:have )?(?:cited|noted)|experts (?:argue|say|agree)|some critics|widely (?:regarded|seen|considered))\b"),
+    # --- Outline conclusions (guide: challenges/future) ---
+    ("outline 'despite challenges/success'", r"\bdespite (?:its|their|these) (?:challenges|success)\b"),
+    ("outline 'future outlook'",             r"\bfuture outlook\b"),
+    # --- Section summaries (guide) ---
+    ("'in summary/conclusion/overall'",      r"\b(?:in summary|in conclusion|overall,)\b"),
+    # --- Didactic disclaimers (guide) ---
+    ("didactic 'it's important to note'",    r"\bit'?s (?:important|crucial|worth)\s+(?:to note|noting|remembering|considering)\b"),
+    ("'worth noting/heeding'",               r"\bworth (?:noting|heeding|paying attention)\b"),
+    # --- AI vocabulary (guide: overused words) ---
+    ("ai-vocab",                             r"\b(?:leverage|leverages|leveraging|delve|delving|tapestry|vibrant|seamless|seamlessly|garner(?:ed|ing)?|foster(?:s|ing|ed)?|showcas(?:e|es|ing|ed)|intricat(?:e|ies)|interplay|realm|navigat(?:e|es|ing|ed)|underpin(?:s|ned|ning)?|myriad|bespoke|robust)\b"),
+    # --- House style ---
+    ("'firm'/'firms'",                       r"\bfirms?\b"),
+    ("em dash leak",                         r"—"),
 ]
 
 
