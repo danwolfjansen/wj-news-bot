@@ -175,9 +175,19 @@ and are focused on the German market.
   time references instead ("over the next 12-18 months", "in the coming year", "recently")
 
 ## Example of the right tone
-"We've seen this pattern before in our SAP practice. When a major vendor shifts
-strategy, the talent market follows within 12-18 months. Experience with the
-previous transition tends to become the most valuable thing on a CV."
+"When a major vendor shifts strategy, the talent market follows within 12-18
+months. Two of our last three SAP mandates asked for migration experience that
+did not exist on the market a year ago. Experience with the previous transition
+tends to become the most valuable thing on a CV."
+
+## Do not open with vague "we're seeing" filler
+NEVER lead a point with "we are seeing", "we're seeing", "we have seen", "we have
+noticed", "we are observing", "we see this as", or "we see this pattern". These
+are empty observation openers. State the concrete thing directly instead: name
+the actual brief, role, skill, or client behaviour. Write "Two clients this month
+asked for X" not "We are seeing demand for X". First-person is welcome when it is
+specific ("we placed", "we expect", "our last three mandates"); it is banned when
+it is a vague "we're seeing a trend" preamble.
 
 ## NEVER use these AI writing patterns
 These phrases make content sound machine-generated. Avoid all of them.
@@ -946,9 +956,12 @@ _AI_TELL_PATTERNS = [
     ("meta 'in real time'",                  r"\bin real[\s-]?time\b"),
     ("meta 'we are watching'",               r"\bwe(?:'re| are) watching\b"),
     ("'the/clear signal'",                   r"\bthe signal\b|\bclear signal\b"),
-    # --- Filler demand-signal ---
+    # --- Filler demand-signal / vague "we're seeing" observation openers ---
     ("filler 'fielding briefs/mandates'",    r"\bfielding\s+(?:briefs?|mandates?|requests?)\b"),
     ("filler 'reflect(s) this shift'",       r"\breflect(?:s|ing)?\s+this\s+shift\b"),
+    ("vague 'we are seeing/observing'",      r"\bwe(?:'re| are)\s+(?:already\s+|increasingly\s+|now\s+|also\s+|currently\s+|still\s+)?(?:seeing|observing|noticing|hearing|witnessing)\b"),
+    ("vague 'we have seen/noticed'",         r"\bwe(?:'ve| have)\s+(?:been\s+)?(?:seen|noticed|observed|tracked|tracking|been seeing|been tracking|started seeing)\b"),
+    ("vague 'we see this/it'",               r"\bwe see (?:this|it)\b"),
     # --- Significance / legacy puffery (guide: Undue emphasis) ---
     ("puffery 'stands/serves as'",           r"\b(?:stands|serves)\s+as\b"),
     ("puffery 'is a testament/reminder'",    r"\bis a (?:testament|reminder)\b"),
