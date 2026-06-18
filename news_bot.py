@@ -289,6 +289,40 @@ These follow the house "ANTI AI WRITING STYLE" guide. Avoid all of them:
 - Present-participle tails that tack on significance: ", highlighting that...",
   ", underscoring how...", ", reflecting the...", ", signalling that...".
 
+### Reworded contrastive pivots (the regex-dodgers)
+You will be tempted to dodge the negative-parallelism ban above by rewording the
+same reversal. These are equally banned, in any form:
+- "Neither X nor Y" / "Neither X is wrong, but Y":
+  "Neither profile is wrong, but the balance is tilting."
+- "X is/are (not) wrong, but Y" of any kind.
+- "The headline/framing is about X, but the subtext/real story is Y":
+  "The headline framing is about resilience, but the subtext is more interesting."
+- "the subtext is...", "the real story is...", "what's (more) interesting is...".
+Make the affirmative point on its own. Never set up a surface reading to knock down.
+
+### Abstract-motion and significance fragments
+Do not bolt a verb of motion or significance onto an abstract noun as a stand-alone
+pronouncement. Banned shapes and real examples:
+- "the hiring signal is clear", "the signal is clear", "the picture is clear"
+- "the balance is tilting", "the balance is shifting", "the gap is widening"
+- "the window to X is narrowing", "the window is closing"
+- "the timing matters", "that matters", "this matters", "the distinction matters"
+- "that category becomes strategic", "X becomes the asset"
+Replace each with a concrete sentence: who is doing what, which skill, which role,
+which client behaviour, which number.
+
+### Concreteness requirement (anti-essay rule)
+Slop reads as one portentous generalisation per paragraph with nothing under it. At
+least half the sentences in the body must carry a concrete particular: a named skill
+or system (SAP, S/4HANA, data architecture, treasury), a specific role or seniority,
+an observed client behaviour, or a number. If a sentence could appear verbatim in a
+post about any other industry, cut it or ground it. Never write a sentence whose only
+job is to announce that something is significant.
+
+### Vague comparison attribution
+Do not prop up a claim with "than benchmarks suggest", "than the data suggests",
+"faster than expected", or similar. Name the source, give the number, or cut the claim.
+
 ## Post structure rules
 Every post must have a DIFFERENT internal structure. Do not use the same sequence of
 sections across posts in the same batch. Some structures that work:
@@ -312,15 +346,15 @@ The title must be punchy and original. Use a wide variety of structures — rota
 through these ten approaches and never use the same structure twice in one batch:
 
 1. Direct market observation: "SAP is quietly reshaping how finance teams hire"
-2. Tension or contradiction: "More AI tools, fewer AI hires — the gap is widening"
+2. Tension or contradiction: "More AI budget, fewer AI hires"
 3. A question a senior professional would actually ask: "Is the CFO role becoming a tech role?"
-4. First-person trend report: "We're seeing a surge in SAP demand — here's why"
-5. A bold specific claim: "The data skills gap in DACH is three years ahead of where most firms think"
-6. The unexpected angle: "Nobody's talking about what this means for mid-level SAP managers"
+4. First-person trend report: "Three SAP migration mandates landed on our desk this month"
+5. A bold specific claim: "The data skills gap in DACH is three years ahead of where most companies think"
+6. The unexpected angle: "Nobody's talking about the mid-level SAP managers caught in this"
 7. A hiring signal framed as news: "When HSBC moves like this, DACH banks follow within 18 months"
 8. The candidate's perspective: "Senior finance professionals are being asked to do something new"
 9. A market verdict: "The case for generalist CFOs just got weaker"
-10. A pattern we've spotted: "Three mandates this month alone — the Financial Advisory market is moving"
+10. A pattern we've spotted: "Three Financial Advisory mandates this month, all asking for the same skill"
 
 BANNED headline patterns — never use regardless of structure number:
 - "What X means for Y" in any form
@@ -366,6 +400,13 @@ Then also check:
   "Here's the", "Here's what", "12 to 18 months" appearing more than once across
   the batch. Rewrite.
 - Headline containing "What X means", "What X tells us", "momentum", "continues". Rewrite.
+- Reworded contrastive pivots: "Neither X nor Y", "X is/are (not) wrong, but Y",
+  "the headline/framing is about X but Y", "the subtext/real story is...". Rewrite.
+- Abstract-motion fragments: "the [noun] signal is clear", "the [noun] is clear",
+  "the balance is tilting/shifting", "the gap is widening", "the window is
+  narrowing/closing", "the timing/this/that matters", "[noun] becomes strategic". Rewrite.
+- Vague comparison: "than benchmarks/the data suggest", "faster than expected".
+  Name the source or number, or cut.
 
 Do not output the JSON until all checks pass.
 
@@ -984,6 +1025,17 @@ _AI_TELL_PATTERNS = [
     ("'worth noting/heeding'",               r"\bworth (?:noting|heeding|paying attention)\b"),
     # --- AI vocabulary (guide: overused words) ---
     ("ai-vocab",                             r"\b(?:leverage|leverages|leveraging|delve|delving|tapestry|vibrant|seamless|seamlessly|garner(?:ed|ing)?|foster(?:s|ing|ed)?|showcas(?:e|es|ing|ed)|intricat(?:e|ies)|interplay|realm|navigat(?:e|es|ing|ed)|underpin(?:s|ned|ning)?|myriad|bespoke|robust)\b"),
+    # --- Reworded pivots / abstract-motion (CFO-slop class, regex-dodgers) ---
+    ("'the X signal'",                       r"\bthe\s+\w+\s+signal\b"),
+    ("'the X is clear' sign-off",            r"\bthe\s+\w+\s+is\s+clear\b"),
+    ("abstract-motion 'X is tilting/widening'", r"\bthe\s+\w+\s+is\s+(?:tilting|shifting|narrowing|widening|closing|shrinking)\b"),
+    ("metaphor 'the window' (closing)",      r"\bthe window\b[^.!?]*\b(?:narrow|clos|shrink)"),
+    ("fragment 'X matters' pronouncement",   r"\b(?:that|this|the timing|the distinction|the difference|the nuance|the gap|the context)\s+matters\b"),
+    ("reworded 'neither X ... but'",         r"\bneither\b[^.!?]*\bbut\b"),
+    ("reworded 'is/are (not) wrong, but'",   r"\b(?:is|are)\s+(?:not\s+)?wrong,\s*but\b"),
+    ("setup 'the subtext/real story is'",    r"\bthe\s+(?:subtext|real story)\s+is\b"),
+    ("setup 'framing is about'",             r"\bframing is about\b"),
+    ("vague 'than benchmarks/data suggest'", r"\bthan\s+(?:benchmarks?|the data|the numbers?|metrics?|reports?)\s+suggests?\b"),
     # --- House style ---
     ("'firm'/'firms'",                       r"\bfirms?\b"),
     ("em dash leak",                         r"—"),
@@ -1025,6 +1077,16 @@ def _build_correction_message(tells: list) -> str:
         "- Never write \"the implication is clear\" / \"the takeaway is clear\"; "
         "state the implication itself.\n"
         "- Use \"company\"/\"companies\", never \"firm\"/\"firms\".\n"
+        "- Remove reworded contrastive pivots: \"Neither X nor Y\", \"X is/are (not) "
+        "wrong, but Y\", \"the headline/framing is about X but Y\", \"the subtext/real "
+        "story is...\". State the affirmative point on its own.\n"
+        "- Remove abstract-motion fragments: \"the [noun] signal is clear\", \"the "
+        "[noun] is clear\", \"the balance is tilting\", \"the gap is widening\", \"the "
+        "window is narrowing\", \"the timing/this/that matters\", \"[noun] becomes "
+        "strategic\". Replace with a concrete sentence naming who does what, which "
+        "skill, role, or number.\n"
+        "- Replace vague comparison (\"than benchmarks/the data suggest\", \"faster "
+        "than expected\") with a named source or specific number, or cut it.\n"
         "Keep the same facts, division, length (250-400 words), prose-only format "
         "(no subheadings), and the italic source credit line. Return ONLY the JSON "
         "object in the same format."

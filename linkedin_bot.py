@@ -331,6 +331,20 @@ These are structural AI tells. Do NOT use them. Rephrase.
   also banned. The right answer is to drop the contrast entirely and just
   state the current state.)
 
+## Reworded contrastive pivots and abstract-motion (CFO-slop class)
+Do not dodge the bans above by rewording the same moves:
+- "Neither X nor Y", "X is/are (not) wrong, but Y", "the headline/framing is
+  about X but Y", "the subtext/real story is...". State the affirmative point.
+- Abstract-motion fragments: "the hiring signal is clear", "the [noun] is clear",
+  "the balance is tilting/shifting", "the gap is widening", "the window is
+  narrowing/closing", "the timing/this/that matters", "[noun] becomes strategic".
+  Name who does what, which skill, role, or number instead.
+- Vague comparison: "than benchmarks/the data suggest", "faster than expected".
+  Give the source or the number, or cut the claim.
+- Concreteness: at least half your sentences must carry a concrete particular
+  (a named system, role, client behaviour, or number). Never write a sentence
+  whose only job is to announce that something is significant.
+
 ## What not to do — BANNED WORDS & PHRASES
 - "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
 - "underscores", "highlights the importance", "evolving landscape",
@@ -388,6 +402,15 @@ Scan post_text for:
     the shortlist", etc.).
 17. "has moved from X to Y" / "have moved from X to Y" abstract-contrast —
     rewrite as a plain statement of the current state.
+18. Reworded contrastive pivots: "Neither X nor Y", "X is/are (not) wrong, but
+    Y", "the headline/framing is about X but Y", "the subtext/real story is..."
+    — state the affirmative point.
+19. Abstract-motion fragments: "the [noun] signal is clear", "the [noun] is
+    clear", "the balance is tilting/shifting", "the gap is widening", "the
+    window is narrowing/closing", "the timing/this/that matters", "[noun]
+    becomes strategic" — rewrite with concrete content.
+20. Vague comparison: "than benchmarks/the data suggest", "faster than
+    expected" — name the source or number, or cut.
 If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
@@ -641,6 +664,15 @@ Rewrite the ENTIRE post without ANY of the following:
   - "has moved from X to Y" / "have moved from X to Y" abstract-contrast
     cadence is banned. State the current state plainly without the contrast
     ("Technical fluency in AI is now a baseline requirement.").
+  - Reworded contrastive pivots: "Neither X nor Y", "X is/are (not) wrong, but
+    Y", "the headline/framing is about X but Y", "the subtext/real story is..."
+    Drop the surface-reading setup and state the point.
+  - Abstract-motion fragments: "the hiring signal is clear", "the [noun] is
+    clear", "the balance is tilting", "the gap is widening", "the window is
+    narrowing", "the timing/this/that matters", "[noun] becomes strategic".
+    Replace with who does what, which skill, role, or number.
+  - Vague comparison: "than benchmarks/the data suggest", "faster than
+    expected". Give the source or the number, or cut the claim.
 If a sentence depends on a contrast or a meta-frame, restructure it so it
 doesn't.
 
@@ -822,6 +854,57 @@ def _detect_banned_patterns(text: str) -> list[str]:
         _re.IGNORECASE,
     )
     hits += [m.group(0) for m in p_p.finditer(text)]
+
+    # (Q) "the [noun] signal" — e.g. "the hiring signal is clear". Complements
+    #     (L), which only catches the "is a ... signal" noun form.
+    p_q = _re.compile(r"\bthe\s+\w+\s+signal\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_q.finditer(text)]
+
+    # (R) "the [noun] is clear" sign-off ("the signal is clear", "the picture is
+    #     clear"). Deliberately broad; the retry decides if it's load-bearing.
+    p_r = _re.compile(r"\bthe\s+\w+\s+is\s+clear\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_r.finditer(text)]
+
+    # (S) Abstract-motion: significance verb bolted onto an abstract noun.
+    p_s = _re.compile(
+        r"\bthe\s+\w+\s+is\s+(?:tilting|shifting|narrowing|widening|closing|shrinking)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_s.finditer(text)]
+
+    # (T) "the window ... narrowing/closing/shrinking" metaphor.
+    p_t = _re.compile(r"\bthe window\b[^.?!\n]{0,80}\b(?:narrow|clos|shrink)", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_t.finditer(text)]
+
+    # (U) "X matters" pronouncement ("the timing matters", "that matters").
+    p_u = _re.compile(
+        r"\b(?:that|this|the timing|the distinction|the difference|the nuance|the gap|the context)\s+matters\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_u.finditer(text)]
+
+    # (V) Reworded pivot "neither X ... but Y".
+    p_v = _re.compile(r"\bneither\b[^.?!\n]{1,90}\bbut\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_v.finditer(text)]
+
+    # (W) Reworded pivot "is/are (not) wrong, but Y".
+    p_w = _re.compile(r"\b(?:is|are)\s+(?:not\s+)?wrong,\s*but\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_w.finditer(text)]
+
+    # (X) Surface-reading setups "the subtext is" / "the real story is".
+    p_x = _re.compile(r"\bthe\s+(?:subtext|real story)\s+is\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_x.finditer(text)]
+
+    # (Y) "framing is about ..." setup.
+    p_y = _re.compile(r"\bframing is about\b", _re.IGNORECASE)
+    hits += [m.group(0) for m in p_y.finditer(text)]
+
+    # (Z) Vague comparison attribution: "than benchmarks/the data suggest".
+    p_z = _re.compile(
+        r"\bthan\s+(?:benchmarks?|the data|the numbers?|metrics?|reports?)\s+suggests?\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_z.finditer(text)]
 
     return hits
 
