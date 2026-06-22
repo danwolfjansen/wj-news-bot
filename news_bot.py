@@ -857,7 +857,48 @@ Return ONLY the headline text, nothing else."""
 # ---------------------------------------------------------------------------
 # STEP 2b: Rewrite with Claude
 # ---------------------------------------------------------------------------
-def rewrite_story(story: dict, client: anthropic.Anthropic) -> Optional[dict]:
+def _variety_brief(prior_drafts: Optional[list]) -> str:
+    """Build a constraint block listing the openers/closers already used in this
+    run, so each new post is told to differ in structure. This is what makes the
+    'vary structure' instruction enforceable: without it each post is generated
+    blind to its siblings and they converge on the same shape."""
+    if not prior_drafts:
+        return ""
+    import re as _re
+    lines = []
+    for d in prior_drafts:
+        body = _re.sub(r"<[^>]+>", " ", d.get("body", "") or "")
+        body = _re.sub(r"\s+", " ", body).strip()
+        sents = [s for s in _re.split(r"(?<=[.!?])\s+", body) if s]
+        opener = sents[0] if sents else ""
+        closer = sents[-1] if sents else ""
+        lines.append(
+            f'- "{d.get("title","")}"\n'
+            f'    opens: "{opener[:160]}"\n'
+            f'    closes: "{closer[:160]}"'
+        )
+    used = "\n".join(lines)
+    return (
+        "\n\n## VARIETY CONSTRAINT — read carefully\n"
+        "The posts below are ALREADY written in today's batch. Yours must read like "
+        "a different writer wrote it. Do NOT reuse their opening move, their closing "
+        "move, or their overall shape. Specifically:\n"
+        "- Do NOT close with a 'those who move early gain an advantage, those who "
+        "wait fall behind' contrast if any post below already does.\n"
+        "- Do NOT close with a 'we expect this over the next 12-18 months' line if "
+        "any post below already does. Vary the time framing or drop it.\n"
+        "- If a post below opens with a general market maxim, open yours with "
+        "something concrete instead: a specific fact, a number, the candidate's "
+        "view, or the actual news.\n"
+        "- Pick a different ending type from those used below: a concrete "
+        "recommendation, one sharp observation, a question you then answer, or a "
+        "named example.\n\n"
+        f"Already used in this batch:\n{used}\n"
+    )
+
+
+def rewrite_story(story: dict, client: anthropic.Anthropic,
+                  prior_drafts: Optional[list] = None) -> Optional[dict]:
     user_message = f"""
 Original headline: {story['title']}
 Source: {story['source']}
@@ -869,7 +910,7 @@ Summary / extract:
 
 Please rewrite this as an original Wolf Jansen commentary post. Remember to end
 the body with a link back to the original source at {story['link']}.
-"""
+{_variety_brief(prior_drafts)}"""
     messages = [{"role": "user", "content": user_message}]
     try:
         result = _generate_parse_clean(client, messages)
@@ -988,6 +1029,7 @@ _AI_TELL_PATTERNS = [
     ("fragment 'the cracks show'",           r"\bthe cracks show\b"),
     ("fragment 'framing matters'",           r"\bframing matters\b"),
     ("fragment 'was never the hard part'",   r"\bwas never the (?:hard part|main constraint|point)\b"),
+    ("cliché 'table stakes'",                r"\btable stakes\b"),
     # --- Rhetorical setups / meta-narration ---
     ("'the (real/underlying) question is'",  r"\bthe (?:underlying |real )?question\b[^.!?]{0,90}\bis\b"),
     ("'the implication/takeaway is clear'",  r"\bthe (?:implication|takeaway|lesson|message)s? (?:is|are|here is) clear\b"),
@@ -1345,7 +1387,7 @@ def main():
                     log.info(f"  ✗ Skipped (not relevant to {division_key})")
                     seen.add(story["id"])
                     continue
-                rewritten = rewrite_story(story, ai_client)
+                rewritten = rewrite_story(story, ai_client, prior_drafts=new_drafts)
                 seen.add(story["id"])
 
                 if not rewritten:
