@@ -175,19 +175,21 @@ and are focused on the German market.
   time references instead ("over the next 12-18 months", "in the coming year", "recently")
 
 ## Example of the right tone
-"When a major vendor shifts strategy, the talent market follows within 12-18
-months. Two of our last three SAP mandates asked for migration experience that
-did not exist on the market a year ago. Experience with the previous transition
-tends to become the most valuable thing on a CV."
+"When a major vendor shifts strategy, the DACH talent market reprices the skills
+that touch it. One financial-services client this month rewrote an S/4HANA lead
+brief to put data-residency experience among the must-haves. Candidates who can
+speak to both the migration and the compliance side are the ones getting
+shortlisted first."
 
 ## Do not open with vague "we're seeing" filler
 NEVER lead a point with "we are seeing", "we're seeing", "we have seen", "we have
 noticed", "we are observing", "we see this as", or "we see this pattern". These
 are empty observation openers. State the concrete thing directly instead: name
-the actual brief, role, skill, or client behaviour. Write "Two clients this month
+the actual brief, role, skill, or client behaviour. Write "A client this month
 asked for X" not "We are seeing demand for X". First-person is welcome when it is
-specific ("we placed", "we expect", "our last three mandates"); it is banned when
-it is a vague "we're seeing a trend" preamble.
+specific ("we placed", "we expect", "a client briefed us this week"); it is banned
+when it is a vague "we're seeing a trend" preamble. Do not lean on a recurring
+count of mandates (see the anti-repetition rule below).
 
 ## NEVER use these AI writing patterns
 These phrases make content sound machine-generated. Avoid all of them.
@@ -323,6 +325,31 @@ job is to announce that something is significant.
 Do not prop up a claim with "than benchmarks suggest", "than the data suggests",
 "faster than expected", or similar. Name the source, give the number, or cut the claim.
 
+### Do not template the Wolf Jansen evidence (anti-repetition)
+Across a batch these posts keep reaching for the SAME few moves, which makes every
+post read like the same template. Each move below is now restricted:
+- The rule-of-three placement claim. Stop defaulting to "three" as the count of
+  our mandates, briefs, roles, placements or consultants. "We placed three X this
+  quarter", "Three of our recent mandates", "Two of our last three" are all banned
+  as a reflex. When you cite our own evidence, vary the count, vary the timeframe,
+  vary where in the post it sits, and in at least half of posts use no count at
+  all. Never let the number be "three".
+- The "this did not exist X ago" novelty line. "Two years ago that requirement did
+  not exist", "barely existed a year ago", "would not have appeared in the brief 18
+  months ago" are banned. Make the point about what the role demands now, in plain
+  terms, without the before/after time contrast.
+- The "rare skill combination" framing. "That combination is rare / scarce /
+  uncommon / hard to find", "candidates with that profile are scarce", "the skill
+  combination barely existed" are banned as a default. If scarcity is the real
+  point, show it concretely (a specific role we struggled to fill, a named skill
+  pairing clients keep requesting) instead of asserting rarity.
+- The dual-audience sign-off. Do NOT default to ending (or building) every post as
+  "For candidates, ... For hiring managers, ...". Serving both audiences in turn is
+  fine once in a while, but it must not be the standard shape. Most posts should
+  land one audience, or fold the implication into the body.
+When our own evidence appears it must be specific AND fresh from post to post. If
+you cannot make it specific and fresh, leave it out and make the market point.
+
 ## Post structure rules
 Every post must have a DIFFERENT internal structure. Do not use the same sequence of
 sections across posts in the same batch. Some structures that work:
@@ -348,13 +375,13 @@ through these ten approaches and never use the same structure twice in one batch
 1. Direct market observation: "SAP is quietly reshaping how finance teams hire"
 2. Tension or contradiction: "More AI budget, fewer AI hires"
 3. A question a senior professional would actually ask: "Is the CFO role becoming a tech role?"
-4. First-person trend report: "Three SAP migration mandates landed on our desk this month"
+4. First-person trend report: "A wave of S/4HANA migration briefs hit our desk this quarter, all light on one skill"
 5. A bold specific claim: "The data skills gap in DACH is three years ahead of where most companies think"
 6. The unexpected angle: "Nobody's talking about the mid-level SAP managers caught in this"
 7. A hiring signal framed as news: "When HSBC moves like this, DACH banks follow within 18 months"
 8. The candidate's perspective: "Senior finance professionals are being asked to do something new"
 9. A market verdict: "The case for generalist CFOs just got weaker"
-10. A pattern we've spotted: "Three Financial Advisory mandates this month, all asking for the same skill"
+10. A pattern we've spotted: "The same compliance skill keeps showing up in every Financial Advisory brief we take"
 
 BANNED headline patterns — never use regardless of structure number:
 - "What X means for Y" in any form
@@ -407,6 +434,16 @@ Then also check:
   narrowing/closing", "the timing/this/that matters", "[noun] becomes strategic". Rewrite.
 - Vague comparison: "than benchmarks/the data suggest", "faster than expected".
   Name the source or number, or cut.
+- Rule-of-three placement claim: "three" used as the count of our mandates, briefs,
+  roles, placements or consultants ("we placed three", "three of our recent
+  mandates", "two of our last three"). Vary the count and timeframe, or drop it.
+  Never make the number "three".
+- Novelty line: "did not exist ... ago", "barely existed ... ago", "would not have
+  appeared ... ago". Rewrite to state what the role demands now.
+- Scarce-combination framing: "the combination is rare/scarce/uncommon/hard to
+  find", "candidates/profiles are scarce". Show scarcity concretely or cut it.
+- Dual-audience close: a "For candidates, ... For hiring managers, ..." pairing.
+  Land one audience or fold it into the body.
 
 Do not output the JSON until all checks pass.
 
@@ -1078,6 +1115,15 @@ _AI_TELL_PATTERNS = [
     ("setup 'the subtext/real story is'",    r"\bthe\s+(?:subtext|real story)\s+is\b"),
     ("setup 'framing is about'",             r"\bframing is about\b"),
     ("vague 'than benchmarks/data suggest'", r"\bthan\s+(?:benchmarks?|the data|the numbers?|metrics?|reports?)\s+suggests?\b"),
+    # --- Templated WJ evidence / cross-post repetition (anti-formula) ---
+    ("rule-of-three placement claim",        r"\bthree\b[^.!?]{0,40}\b(?:mandates?|briefs?|roles?|placements?|consultants?|hires?|searches?|candidates?|clients?)\b"),
+    ("'(N) of our last/recent three'",       r"\bof our (?:last|recent)\s+three\b"),
+    ("'we (have) placed three'",             r"\bwe(?:'ve| have)?\s+placed\s+three\b"),
+    ("novelty 'did not exist ... ago'",      r"\b(?:did|does)\s*n[o']?t\s+exist\b[^.!?]{0,80}\bago\b|\bago\b[^.!?]{0,80}\b(?:did|does)\s*n[o']?t\s+exist\b"),
+    ("novelty 'barely existed / would not have'", r"\bbarely existed\b|\bwould not have (?:existed|appeared)\b"),
+    ("'rare/scarce skill combination'",      r"\bcombination\b[^.!?]{0,30}\b(?:is|are|was|were|remains?)\s+(?:rare|scarce|uncommon|hard(?:er)? to find)\b|\b(?:rare|scarce|uncommon)\s+(?:skill\s+)?combination\b"),
+    ("'profiles/candidates are scarce'",     r"\b(?:profile|profiles|candidates?|specialists?)\b[^.!?]{0,20}\b(?:are|is|remain|remains)\s+(?:scarce|rare|uncommon|thin on the ground)\b"),
+    ("dual 'for candidates ... for hiring'", r"for candidates\b.{0,600}for hiring managers\b|for hiring managers\b.{0,600}for candidates\b"),
     # --- House style ---
     ("'firm'/'firms'",                       r"\bfirms?\b"),
     ("em dash leak",                         r"—"),
@@ -1129,6 +1175,15 @@ def _build_correction_message(tells: list) -> str:
         "skill, role, or number.\n"
         "- Replace vague comparison (\"than benchmarks/the data suggest\", \"faster "
         "than expected\") with a named source or specific number, or cut it.\n"
+        "- Do NOT use the rule-of-three placement claim (\"we placed three...\", "
+        "\"three of our recent mandates\", \"two of our last three\"). Vary the count "
+        "and timeframe, or cite no count. The number must not be \"three\".\n"
+        "- Remove the \"this did not exist X ago\" novelty line and the "
+        "\"rare/scarce skill combination\" framing. State what the role demands now, "
+        "concretely, and show scarcity with a specific role or skill pairing if it "
+        "is real.\n"
+        "- Do not end with the dual \"For candidates... For hiring managers...\" "
+        "sign-off. Land one audience or fold the implication into the body.\n"
         "Keep the same facts, division, length (250-400 words), prose-only format "
         "(no subheadings), and the italic source credit line. Return ONLY the JSON "
         "object in the same format."

@@ -345,6 +345,25 @@ Do not dodge the bans above by rewording the same moves:
   (a named system, role, client behaviour, or number). Never write a sentence
   whose only job is to announce that something is significant.
 
+## Do not template the Wolf Jansen evidence (anti-repetition)
+Consecutive posts keep reaching for the SAME few moves, which makes the company
+page read like one template on repeat. Each is now restricted:
+- The rule-of-three placement claim. Stop defaulting to "three" as the count of
+  our mandates, briefs, roles, placements or consultants. "We placed three X this
+  quarter", "Three of our recent mandates", "Two of our last three" are banned as
+  a reflex. Vary the count and the timeframe, and use no count at all in most
+  posts. The number must not be "three". (A concrete proof point like "Across 50+
+  SAP placements this year" is fine; a recurring "three mandates" tic is not.)
+- The "this did not exist X ago" novelty line ("two years ago that requirement
+  did not exist", "barely existed a year ago"). This is the then/now contrast in
+  another costume and is banned. State what the role demands now, plainly.
+- The "rare skill combination" framing ("that combination is rare/scarce/
+  uncommon/hard to find", "candidates with that profile are scarce"). Banned as a
+  default. Show scarcity concretely (a role we could not fill, a named skill
+  pairing clients keep asking for) or drop it.
+- The dual-audience sign-off. Do NOT default to "For candidates, ... For hiring
+  managers, ...". Land one audience, or fold the implication into the post.
+
 ## What not to do — BANNED WORDS & PHRASES
 - "pivotal moment", "pivotal", "stands as a testament to", "setting the stage for"
 - "underscores", "highlights the importance", "evolving landscape",
@@ -411,6 +430,16 @@ Scan post_text for:
     becomes strategic" — rewrite with concrete content.
 20. Vague comparison: "than benchmarks/the data suggest", "faster than
     expected" — name the source or number, or cut.
+21. Rule-of-three placement claim: "three" as the count of our mandates, briefs,
+    roles, placements or consultants ("we placed three", "three of our recent
+    mandates", "two of our last three") — vary the count and timeframe or drop
+    it. The number must not be "three".
+22. Novelty line: "did not exist ... ago", "barely existed ... ago", "would not
+    have appeared ... ago" — state what the role demands now.
+23. Scarce-combination framing: "the combination is rare/scarce/uncommon/hard to
+    find", "candidates/profiles are scarce" — show it concretely or cut.
+24. Dual-audience close: a "For candidates, ... For hiring managers, ..." pairing
+    — land one audience or fold it into the post.
 If any trigger fires, rewrite the sentence before outputting.
 
 ## Output format
@@ -673,6 +702,14 @@ Rewrite the ENTIRE post without ANY of the following:
     Replace with who does what, which skill, role, or number.
   - Vague comparison: "than benchmarks/the data suggest", "faster than
     expected". Give the source or the number, or cut the claim.
+  - Rule-of-three placement claim: "we placed three...", "three of our recent
+    mandates", "two of our last three". Vary the count and timeframe, or use no
+    count at all. The number must not be "three".
+  - The "this did not exist X ago" novelty line and the "rare/scarce skill
+    combination" framing. State what the role demands now, and show scarcity with
+    a specific role or skill pairing if it is real.
+  - The dual "For candidates... For hiring managers..." sign-off. Land one
+    audience or fold the implication into the post.
 If a sentence depends on a contrast or a meta-frame, restructure it so it
 doesn't.
 
@@ -905,6 +942,46 @@ def _detect_banned_patterns(text: str) -> list[str]:
         _re.IGNORECASE,
     )
     hits += [m.group(0) for m in p_z.finditer(text)]
+
+    # (AA) Rule-of-three placement claim: "three" as the count of our mandates,
+    #      briefs, roles, placements, consultants. Also "(N) of our last three"
+    #      and "we (have) placed three". Vary the count; never default to three.
+    p_aa = _re.compile(
+        r"\bthree\b[^.?!\n]{0,40}\b(?:mandates?|briefs?|roles?|placements?|consultants?|hires?|searches?|candidates?|clients?)\b"
+        r"|\bof our (?:last|recent)\s+three\b"
+        r"|\bwe(?:['’]ve| have)?\s+placed\s+three\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_aa.finditer(text)]
+
+    # (AB) Novelty line: "did not exist ... ago" / "barely existed ... ago" /
+    #      "would not have existed/appeared".
+    p_ab = _re.compile(
+        r"\b(?:did|does)\s*n[o'’]?t\s+exist\b[^.?!\n]{0,80}\bago\b"
+        r"|\bago\b[^.?!\n]{0,80}\b(?:did|does)\s*n[o'’]?t\s+exist\b"
+        r"|\bbarely existed\b"
+        r"|\bwould not have (?:existed|appeared)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_ab.finditer(text)]
+
+    # (AC) "rare/scarce skill combination" framing and "profiles are scarce".
+    p_ac = _re.compile(
+        r"\bcombination\b[^.?!\n]{0,30}\b(?:is|are|was|were|remains?)\s+(?:rare|scarce|uncommon|hard(?:er)? to find)\b"
+        r"|\b(?:rare|scarce|uncommon)\s+(?:skill\s+)?combination\b"
+        r"|\b(?:profile|profiles|candidates?|specialists?)\b[^.?!\n]{0,20}\b(?:are|is|remain|remains)\s+(?:scarce|rare|uncommon|thin on the ground)\b",
+        _re.IGNORECASE,
+    )
+    hits += [m.group(0) for m in p_ac.finditer(text)]
+
+    # (AD) Dual-audience sign-off: "For candidates ... For hiring managers ..."
+    #      (either order). The default close that makes every post identical.
+    p_ad = _re.compile(
+        r"for candidates\b.{0,600}for hiring managers\b"
+        r"|for hiring managers\b.{0,600}for candidates\b",
+        _re.IGNORECASE | _re.DOTALL,
+    )
+    hits += [m.group(0) for m in p_ad.finditer(text)]
 
     return hits
 
