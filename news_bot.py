@@ -174,22 +174,35 @@ and are focused on the German market.
 - Never reference specific years (e.g. "in 2025", "through 2026"). Use relative
   time references instead ("over the next 12-18 months", "in the coming year", "recently")
 
-## Example of the right tone
-"When a major vendor shifts strategy, the DACH talent market reprices the skills
-that touch it. One financial-services client this month rewrote an S/4HANA lead
-brief to put data-residency experience among the must-haves. Candidates who can
-speak to both the migration and the compliance side are the ones getting
-shortlisted first."
+## Examples of the right tone
+Two examples, deliberately different in shape so you do not copy one template.
+Note that NEITHER leans on the word "brief", neither opens a sentence by pointing
+back at the previous one, and neither ends on "the ones getting shortlisted first":
+
+Example A (leads with a specific client behaviour):
+"A Munich manufacturer spent five months trying to fill an S/4HANA finance role
+and kept turning down strong candidates. The sticking point was data residency:
+they wanted someone who had actually run a Swiss-German split and could argue the
+posting logic with their auditors. We found her in a company that had just been
+through the same migration."
+
+Example B (leads with a market read, no self-reference at all):
+"Salaries for SAP architects who can also stand up an AI integration have moved
+up roughly 15% in Frankfurt and Zurich over the past year. The premium goes to
+people who can sit between the SAP team and the data science team and translate
+in both directions. Companies are paying it because that gap is where their
+migrations stall."
 
 ## Do not open with vague "we're seeing" filler
 NEVER lead a point with "we are seeing", "we're seeing", "we have seen", "we have
 noticed", "we are observing", "we see this as", or "we see this pattern". These
 are empty observation openers. State the concrete thing directly instead: name
-the actual brief, role, skill, or client behaviour. Write "A client this month
+the actual role, skill, search, or client behaviour. Write "A client this month
 asked for X" not "We are seeing demand for X". First-person is welcome when it is
-specific ("we placed", "we expect", "a client briefed us this week"); it is banned
+specific ("we placed", "we expect", "a client asked us for"); it is banned
 when it is a vague "we're seeing a trend" preamble. Do not lean on a recurring
-count of mandates (see the anti-repetition rule below).
+count of mandates, or on "brief/briefs" as the default evidence noun (see the
+anti-repetition rule below).
 
 ## NEVER use these AI writing patterns
 These phrases make content sound machine-generated. Avoid all of them.
@@ -214,6 +227,44 @@ These phrases make content sound machine-generated. Avoid all of them.
     * "on the surface X, but Y": "On the surface this is a vendor story, but..."
     * "shifted/changed rather than Y": "the load has shifted rather than shrunk"
   State the affirmative point directly. Never define something by what it is not.
+- THE CONCESSIVE PIVOT SPREAD ACROSS TWO SENTENCES. This is the single biggest
+  leak right now, because it dodges every "not X, but Y" regex above by splitting
+  the reversal over a full stop. You concede the old thing in one sentence, then
+  pivot to the new thing in the next. Banned in every disguise:
+    * "Those remain foundational. What has changed is the third requirement..."
+    * "Configuration and Basis administration remain valuable, and roles that
+      combine SAP with data science attract the strongest interest."
+    * "Commercial acumen and stakeholder presence still matter. But over the past
+      18 months a new filter has crept in."
+    * "The technical accounting skill remains essential, and advisory fluency has
+      become the separator."
+    * "Compliance work pays the bills, but advisory work builds careers."
+    * Any "X still matters / remains essential / is still valuable / those still
+      matter" followed (in the same or next sentence) by "but / what has
+      changed / the difference / the separator / now".
+  The tell is the concede-then-elevate move itself, not the words. Do not set up
+  the old skill as a foil for the new one. If the new demand is the point, state
+  what companies now ask for and drop the ritual nod to what still counts.
+- THE POINTER-SENTENCE. Do not open a sentence by pointing back at the previous
+  one with a demonstrative ("That / This / Such") attached to an abstract noun,
+  then announcing its significance. Banned shapes and real examples:
+    * "That skill pairing now appears in senior role specifications."
+    * "That kind of mid-brief revision signals where demand is headed."
+    * "That specificity would have been unusual five years ago."
+    * "That observation has direct implications for how companies staff teams."
+    * "This creates a challenge for experienced professionals."
+    * "This also changes the retention calculation."
+    * "That translates into fewer net-new roles."
+  Just make the next point as its own concrete statement. If you catch a sentence
+  starting with "That [noun]..." or "This [verb]s..." that only restates that the
+  prior sentence mattered, delete the pointer and say the substantive thing.
+- THE DISMISS-THEN-ELEVATE OPENER. Do not open by calling the subject boring or
+  small and then revealing it secretly matters. Banned shapes:
+    * "An open gateway joining a foundation sounds like plumbing. But it changes..."
+    * "Another open-source initiative, another press release. But the detail that
+      caught our attention..."
+    * "It sounds like back-office housekeeping. It is not."
+  Open with the substantive point directly. Never stage a fake shrug to knock down.
 - Short punchy fragment tells. One-line "profound" sentences a LinkedIn guru
   would isolate for effect. Banned examples and their shape:
     * "It works until it doesn't."
@@ -347,6 +398,24 @@ post read like the same template. Each move below is now restricted:
   "For candidates, ... For hiring managers, ...". Serving both audiences in turn is
   fine once in a while, but it must not be the standard shape. Most posts should
   land one audience, or fold the implication into the body.
+- THE WORD "BRIEF" IS OVERUSED TO DEATH. It has become the default noun for every
+  piece of evidence ("we have been hearing in briefs", "the briefs we take", "the
+  briefs coming through", "a client briefed us", "mid-brief revision", "the brief
+  landed on our desk"). Hard cap: the words "brief" or "briefs" may appear AT MOST
+  ONCE across the entire post, and preferably zero times. Reach for the specific,
+  varied noun instead: a search, a mandate, a role, a vacancy, a spec, a shortlist,
+  a requirement, a hiring conversation, a client call, a rewritten job description.
+  Vary it post to post. If two posts in a batch both say "brief", rewrite one.
+- THE "WE PLACED X LAST [PERIOD]" ANECDOTE IN THE SAME SLOT. Almost every post
+  props itself up with one interchangeable placement story ("We placed a senior
+  consultant last month...", "We placed a data architect last quarter...", "We
+  placed a senior advisory manager earlier this year..."), and it always sits in
+  the same position doing the same job. Restrict it: no more than one post in a
+  batch may use the bare "We placed a [role] last [period]" construction. In the
+  others, either cite the evidence differently (what a client actually asked for,
+  a specific role that stalled, a skill clients keep requesting by name) or make
+  the market point with no self-reference at all, as in Example B above. Vary the
+  verb, the timeframe, and where in the post the evidence sits.
 When our own evidence appears it must be specific AND fresh from post to post. If
 you cannot make it specific and fresh, leave it out and make the market point.
 
@@ -388,6 +457,16 @@ BANNED headline patterns — never use regardless of structure number:
 - "What X tells us about Y" in any form
 - "X: What Y means for Z" (colon + what it means)
 - Any headline containing the word "momentum" or "continues"
+- The grand declarative trend-pronouncement, which is currently the default and
+  makes every title sound identical. Banned shapes and real examples:
+    * "[Thing] just became a(n) [X] problem" — "Tax compliance just became an SAP
+      data architecture problem"
+    * "The [role] seat now comes with a [X] prerequisite"
+    * "The [thing] is where the [X] war will be fought"
+    * "The [profession] is splitting in two, and the talent market knows it"
+    * Any "..., and the [market/talent market/industry] knows it" tag on the end.
+  These read as portentous captions, not headlines a recruiter would write. Prefer
+  the concrete, first-person, question, or specific-claim structures numbered above.
 Never repeat a headline structure used elsewhere in the same batch.
 
 ## Final check before returning
@@ -416,12 +495,30 @@ Then also check:
 - Contrastive reversal in ANY form: "not X, it's Y", "not just X", "X, not Y",
   "no longer X (but/it's/they're) Y", "necessary but not sufficient",
   "X alone is not enough", "on the surface ... but", "rather than". Rewrite.
+- CONCESSIVE PIVOT across two sentences: any "X remains/still matters/is still
+  essential/those still matter/those remain foundational" that is followed by
+  "but / what has changed / the difference / the separator / and Y now". This is
+  the top leak. Rewrite so the new demand stands on its own with no foil.
+- POINTER-SENTENCES: any sentence opening with "That [noun]..." / "This [verb]s..."
+  / "Such [noun]..." whose job is to restate that the previous sentence mattered
+  ("That skill pairing now appears", "This creates a challenge", "That signals
+  where demand is headed"). Delete the pointer and state the substantive thing.
+- DISMISS-THEN-ELEVATE openers: "sounds like plumbing/housekeeping, but...",
+  "Another X, another Y. But...", "It sounds small. It is not." Open with the point.
 - Short fragment tells: "until it doesn't", "is a symptom", "framing matters",
   "the cracks show", "is a litmus test", "was never the hard part". Rewrite into
   full sentences with concrete content.
 - "the implication is clear", "the takeaway is clear", "for X the implication is
   clear". Rewrite to state the implication itself.
 - "fielding briefs", "reflect(s) this shift". Replace with concrete specifics.
+- The words "brief"/"briefs": count them. More than one in the post means rewrite
+  down to at most one (ideally zero), using a varied noun (search, mandate, role,
+  vacancy, spec, shortlist, requirement, hiring conversation, job description).
+- The bare "We placed a [role] last [period]" anecdote: allowed in at most one post
+  per batch. If this post is not the one, recast the evidence or drop the self-reference.
+- Headline: grand trend-pronouncement shapes ("X just became a Y problem", "now
+  comes with a Y prerequisite", "is where the Y war will be fought", "is splitting
+  in two", "..., and the talent market knows it"). Rewrite to something concrete.
 - The word "firm" or "firms" anywhere. Replace with "company"/"companies".
 - Phrases: "play out", "unfold", "in real time", "worth noting", "the signal",
   "Here's the", "Here's what", "12 to 18 months" appearing more than once across
@@ -836,6 +933,10 @@ _BANNED_HEADLINE_FRAGMENTS = [
     "what this tells us", "what that tells us", "what it tells us",
     "what we're watching", "what we are watching",
     "momentum", " continues",
+    # Grand declarative trend-pronouncement shapes (the current default look)
+    "just became", "now comes with", "splitting in two",
+    "war will be fought", "and the talent market knows",
+    "market knows it", "and the market knows",
 ]
 
 def _headline_is_banned(title: str) -> bool:
@@ -1124,6 +1225,20 @@ _AI_TELL_PATTERNS = [
     ("'rare/scarce skill combination'",      r"\bcombination\b[^.!?]{0,30}\b(?:is|are|was|were|remains?)\s+(?:rare|scarce|uncommon|hard(?:er)? to find)\b|\b(?:rare|scarce|uncommon)\s+(?:skill\s+)?combination\b"),
     ("'profiles/candidates are scarce'",     r"\b(?:profile|profiles|candidates?|specialists?)\b[^.!?]{0,20}\b(?:are|is|remain|remains)\s+(?:scarce|rare|uncommon|thin on the ground)\b"),
     ("dual 'for candidates ... for hiring'", r"for candidates\b.{0,600}for hiring managers\b|for hiring managers\b.{0,600}for candidates\b"),
+    # --- Concessive pivot spread across two sentences (concede-then-elevate) ---
+    # The top current leak: dodges the "not X, but Y" regexes by splitting the
+    # reversal over a full stop ("Those remain foundational. What has changed is Y").
+    ("concessive 'remain(s) foundational/essential'", r"\bremains?\s+(?:foundational|essential|valuable|important|critical|central|relevant|the baseline)\b"),
+    ("concessive 'those/these remain/still'", r"\b(?:those|these)\s+(?:remain\b|still\s+(?:matter|count|apply|hold))"),
+    ("concessive 'still matters/counts'",    r"\bstill\s+(?:matters?|counts?|applies|hold(?:s)? true)\b"),
+    ("concessive 'what has changed is'",     r"\bwhat(?:'s| has| have)?\s+changed\s+is\b"),
+    ("concessive 'become the separator'",    r"\bbecom(?:e|es|ing)\s+the\s+(?:separator|differentiator|dividing line)\b"),
+    # --- Pointer-sentence: demonstrative + significance verb at sentence start ---
+    ("pointer-sentence 'That/This X signals'", r"(?:^|[.!?]\s+)(?:that|this|such)\s+(?:\w+\s+){0,2}(?:also\s+)?(?:signals?|means\b|matters\b|appears?\b|creates?|changes?|translates?\s+into|reflects?|reshapes?|underscores?)\b"),
+    ("aphorism 'pays the bills'",            r"\bpays?\s+the\s+bills\b"),
+    # --- Dismiss-then-elevate opener ---
+    ("dismiss 'sounds like plumbing/boring'", r"\bsounds?\s+like\b[^.!?]*\b(?:plumbing|housekeeping|boring|mundane|dull|a footnote)\b"),
+    ("dismiss 'Another X, another Y'",       r"\banother\b[^,.!?]{0,40},\s*another\b"),
     # --- House style ---
     ("'firm'/'firms'",                       r"\bfirms?\b"),
     ("em dash leak",                         r"—"),
@@ -1144,6 +1259,9 @@ def _detect_ai_tells(result: dict) -> list:
     for label, pat in _AI_TELL_PATTERNS:
         if _re.search(pat, text, _re.IGNORECASE):
             found.append(label)
+    # 'brief'/'briefs' is acceptable once; flag overuse (the default evidence noun).
+    if len(_re.findall(r"\bbriefs?\b", text, _re.IGNORECASE)) > 1:
+        found.append("overused 'brief'/'briefs' (appears more than once)")
     return found
 
 
@@ -1184,6 +1302,20 @@ def _build_correction_message(tells: list) -> str:
         "is real.\n"
         "- Do not end with the dual \"For candidates... For hiring managers...\" "
         "sign-off. Land one audience or fold the implication into the body.\n"
+        "- Remove the concessive pivot: any \"X remains foundational/essential\" or "
+        "\"those still matter\" that you then pivot away from with \"but\" or \"what "
+        "has changed is Y\". Do not set the old skill up as a foil. State what the "
+        "role now demands on its own.\n"
+        "- Remove pointer-sentences that open with \"That [noun]...\" or \"This "
+        "[verb]s...\" only to restate that the previous sentence mattered (\"That "
+        "signals where demand is headed\", \"This creates a challenge\"). Make the "
+        "next point as its own concrete statement.\n"
+        "- Remove dismiss-then-elevate openers (\"sounds like plumbing, but...\", "
+        "\"Another initiative, another press release. But...\"). Open with the point.\n"
+        "- Do not lean on the word \"brief\"/\"briefs\" as the evidence noun. Use it "
+        "at most once (ideally not at all); reach for a specific noun instead: a "
+        "search, a mandate, a role, a vacancy, a spec, a shortlist, a requirement, "
+        "a hiring conversation, a job description.\n"
         "Keep the same facts, division, length (250-400 words), prose-only format "
         "(no subheadings), and the italic source credit line. Return ONLY the JSON "
         "object in the same format."
