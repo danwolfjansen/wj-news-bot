@@ -802,7 +802,7 @@ def _scrub_dashes(text: str) -> str:
 # output — keep this wrapper minimal and trust the model.
 _IMAGE_STYLE_TEMPLATE = (
     "Documentary editorial photograph. {concept} "
-    "Natural available light, full-frame camera, prime lens, journalistic "
+    "{lighting}. Full-frame camera, prime lens, journalistic "
     "framing. Any person in frame is anonymous (from behind, in profile, "
     "face obscured, or at a distance). No readable logos or brand names. "
     "NO VISIBLE TEXT anywhere in the image: no words, numbers, chart "
@@ -813,6 +813,194 @@ _IMAGE_STYLE_TEMPLATE = (
     "angled away from camera. Text rendering is a known weakness of "
     "image models — eliminating it prevents misspellings."
 )
+
+
+# ---------------------------------------------------------------------------
+# Cross-week image variety
+# ---------------------------------------------------------------------------
+# The bot runs weekly with the same concept prompt, and WJ stories are almost
+# always enterprise-software-flavoured, so Haiku kept converging on the same
+# few scenes (multi-monitor workstation from behind, buyer with tablet,
+# meeting across a table) — near-identical images week after week. Three
+# mechanisms fix that:
+#   1. image_concept_history.json, committed to the repo like
+#      seen_stories.json, remembers recent weeks' scene briefs; they are fed
+#      to Haiku as a do-not-resemble list.
+#   2. A word-overlap similarity filter drops any new brief that still looks
+#      like a recent one (or a sibling in the same batch).
+#   3. A deterministic weekly rotation of visual angle + lighting (keyed on
+#      ISO week number) so consecutive weeks get different compositions even
+#      for similar subjects.
+
+_CONCEPT_HISTORY_FILE = "image_concept_history.json"
+_HISTORY_RUNS_KEPT    = 10   # keep the last 10 runs' concepts
+_RECENT_CONCEPT_LIMIT = 12   # how many past briefs to show Haiku / filter on
+
+_WEEKLY_ANGLES = [
+    "close-up detail: a tight shot of hands, tools or equipment mid-use, "
+    "shallow depth of field, the wider room only a soft blur",
+    "wide environmental: the whole workspace or site in frame, any people "
+    "small within a large space",
+    "human at work: one anonymous person mid-task as the clear single subject",
+    "equipment and place only: a scene with no people in frame at all",
+    "exterior context: the building, yard, loading bay or street-level "
+    "location where this work happens, shot from outside",
+    "over-the-shoulder vantage: from just behind a worker, their view partly "
+    "visible but unreadable",
+]
+
+_WEEKLY_LIGHTING = [
+    "Soft overcast daylight",
+    "Low golden-hour sun with long shadows",
+    "Cool early-morning blue light",
+    "Warm interior light against dusk windows",
+    "Bright neutral midday light",
+    "Moody late-evening light from practical lamps",
+]
+
+
+def _weekly_variety() -> dict:
+    """Deterministic rotation of angle and lighting keyed on the absolute
+    week number (year*53 + ISO week, so the cycle doesn't reset each January).
+    The lighting index shifts by one every full pass through the six angles,
+    so all 36 angle/lighting pairings occur before any combination repeats."""
+    iso = datetime.now(timezone.utc).isocalendar()
+    week = iso[0] * 53 + iso[1]
+    n = len(_WEEKLY_ANGLES)
+    return {
+        "angle":    _WEEKLY_ANGLES[week % n],
+        "lighting": _WEEKLY_LIGHTING[(week + week // n) % len(_WEEKLY_LIGHTING)],
+    }
+
+
+def _gh_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {LINKEDIN_CONFIG['github_token']}",
+        "Accept":        "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _load_concept_history() -> list:
+    """Load recent runs' image concepts. Tries the GitHub Contents API (works
+    in Actions), then the public raw URL, then a local file. Returns a list of
+    {"date": ..., "concepts": [...]} dicts, oldest first; [] on any failure."""
+    repo = LINKEDIN_CONFIG["github_repository"]
+    if LINKEDIN_CONFIG["github_token"]:
+        try:
+            resp = requests.get(
+                f"https://api.github.com/repos/{repo}/contents/{_CONCEPT_HISTORY_FILE}",
+                headers=_gh_headers(), timeout=15)
+            if resp.status_code == 200:
+                data = json.loads(base64.b64decode(resp.json()["content"]))
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            log.warning(f"Concept history API load failed: {e}")
+    try:
+        resp = requests.get(
+            f"https://raw.githubusercontent.com/{repo}/main/{_CONCEPT_HISTORY_FILE}",
+            timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+    except Exception as e:
+        log.warning(f"Concept history raw load failed: {e}")
+    try:
+        if os.path.exists(_CONCEPT_HISTORY_FILE):
+            with open(_CONCEPT_HISTORY_FILE) as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
+
+
+def _save_concept_history(history: list):
+    """Persist concept history: GitHub Contents API in the cloud (create or
+    update with sha), local file otherwise. Best-effort; failures only log."""
+    history = history[-_HISTORY_RUNS_KEPT:]
+    content = json.dumps(history, indent=2)
+    repo = LINKEDIN_CONFIG["github_repository"]
+    if LINKEDIN_CONFIG["github_token"]:
+        try:
+            api_url = f"https://api.github.com/repos/{repo}/contents/{_CONCEPT_HISTORY_FILE}"
+            sha = None
+            probe = requests.get(api_url, headers=_gh_headers(), timeout=15)
+            if probe.status_code == 200:
+                sha = probe.json().get("sha")
+            payload = {
+                "message": "chore: update image concept history [skip ci]",
+                "content": base64.b64encode(content.encode()).decode(),
+                "branch":  "main",
+            }
+            if sha:
+                payload["sha"] = sha
+            resp = requests.put(api_url, headers=_gh_headers(), json=payload,
+                                timeout=30)
+            if resp.status_code in (200, 201):
+                log.info("Concept history saved to repo.")
+                return
+            log.warning(f"Concept history save failed [{resp.status_code}]: "
+                        f"{resp.text[:200]}")
+        except Exception as e:
+            log.warning(f"Concept history save error: {e}")
+    try:
+        with open(_CONCEPT_HISTORY_FILE, "w") as f:
+            f.write(content)
+        log.info("Concept history saved locally.")
+    except Exception as e:
+        log.warning(f"Concept history local save failed: {e}")
+
+
+def _recent_concepts(history: list, limit: int = _RECENT_CONCEPT_LIMIT) -> list[str]:
+    out = []
+    for run in history:
+        for c in run.get("concepts", []):
+            if isinstance(c, str) and c.strip():
+                out.append(c.strip())
+    return out[-limit:]
+
+
+_CONCEPT_STOPWORDS = {
+    "with", "from", "behind", "against", "light", "lighting", "shot", "frame",
+    "framing", "angle", "focus", "depth", "shallow", "seen", "across", "into",
+    "over", "under", "beside", "through", "camera", "foreground", "background",
+    "soft", "warm", "cool", "golden", "hour", "morning", "afternoon", "evening",
+    "window", "windows", "anonymous", "profile", "obscured", "distance", "wide",
+    "close", "view", "scene", "modern", "their", "that", "this",
+}
+
+
+def _concept_tokens(text: str) -> set:
+    import re as _re
+    return {w for w in _re.findall(r"[a-z]+", text.lower())
+            if len(w) > 3 and w not in _CONCEPT_STOPWORDS}
+
+
+def _concepts_similar(a: str, b: str, threshold: float = 0.5) -> bool:
+    ta, tb = _concept_tokens(a), _concept_tokens(b)
+    if not ta or not tb:
+        return False
+    overlap = len(ta & tb) / len(ta | tb)
+    return overlap >= threshold
+
+
+def _filter_similar_concepts(concepts: list[str], recent: list[str]) -> list[str]:
+    """Drop concepts that resemble a recent week's brief or an earlier sibling
+    in the same batch."""
+    kept: list[str] = []
+    for c in concepts:
+        clash = next((r for r in recent if _concepts_similar(c, r)), None)
+        if clash is None:
+            clash = next((k for k in kept if _concepts_similar(c, k, 0.6)), None)
+        if clash is not None:
+            log.info(f"Dropped near-duplicate concept: '{c[:70]}' ~ '{clash[:70]}'")
+            continue
+        kept.append(c)
+    return kept
 
 
 def _haiku_json_concepts(anthropic_client: anthropic.Anthropic,
@@ -866,10 +1054,31 @@ def _haiku_json_concepts(anthropic_client: anthropic.Anthropic,
 
 
 def _build_story_concepts(entry: dict, count: int,
-                           anthropic_client: anthropic.Anthropic) -> list[str]:
-    """Ask Claude Haiku for N story-anchored photograph concepts, as JSON."""
+                           anthropic_client: anthropic.Anthropic,
+                           avoid: Optional[list] = None,
+                           angle: str = "") -> list[str]:
+    """Ask Claude Haiku for N story-anchored photograph concepts, as JSON.
+    `avoid` lists recent weeks' briefs the new ones must not resemble;
+    `angle` is this week's rotating composition instruction."""
     title   = (entry.get("title", "")   or "")[:200]
     excerpt = (entry.get("excerpt", "") or "")[:1200]
+
+    avoid_block = ""
+    if avoid:
+        avoid_block = (
+            "RECENTLY USED SCENES — these are the briefs behind the last few "
+            "weeks' images. Your new briefs must NOT depict the same subject "
+            "or composition as ANY of them. If the obvious subject for this "
+            "story already appears below, pick a different subject from the "
+            "story:\n"
+            + "\n".join("  - " + a for a in avoid[-_RECENT_CONCEPT_LIMIT:])
+            + "\n\n")
+
+    angle_block = ""
+    if angle:
+        angle_block = (
+            "THIS WEEK'S VISUAL ANGLE — to keep the feed varied from week to "
+            "week, build every brief around this composition: " + angle + "\n\n")
 
     primary_prompt = (
         "You are a photo editor writing briefs for a documentary photographer. "
@@ -943,6 +1152,12 @@ def _build_story_concepts(entry: dict, count: int,
         "interior behind. (3) Two figures across a meeting-room table seen "
         "from the side, one gesturing toward a wall-mounted screen, late-"
         "afternoon light, no readable text on the screen.\n\n"
+        "THE EXAMPLES ARE PATTERNS, NOT A MENU. Do not copy any subject or "
+        "scene from the worked examples or the MODERN SUBJECT RULE list "
+        "verbatim — invent subjects from THIS story. A brief that echoes an "
+        "example (workstation-from-behind, buyer-with-tablet-by-windows, "
+        "two-figures-across-a-meeting-table) will be rejected.\n\n"
+        + avoid_block + angle_block +
         "Now do the same for this story.\n\n"
         "Story title: " + title + "\n"
         "Story excerpt: " + excerpt + "\n\n"
@@ -976,6 +1191,7 @@ def _build_story_concepts(entry: dict, count: int,
             "multi-monitor workstation, a tablet on a modern desk, a "
             "supplier meeting in a glass-walled meeting room, a goods-"
             "receiving bay with handheld scanners — 2026, not 1995.\n\n"
+            + avoid_block + angle_block +
             "Story title: " + title + "\n"
             "Story excerpt: " + excerpt + "\n\n"
             "Return ONLY JSON: {\"scenes\": [\"...\", \"...\"" +
@@ -1087,7 +1303,28 @@ def generate_image_candidates(entry: dict, token: str,
     # in case a future refactor moves the config to a non-env source.
     os.environ["FAL_KEY"] = api_key
 
-    concepts = _build_story_concepts(entry, count, anthropic_client)
+    # Cross-week variety: recent weeks' briefs become a do-not-resemble list,
+    # and this week's rotating angle + lighting shape the new scenes.
+    history = _load_concept_history()
+    recent  = _recent_concepts(history)
+    variety = _weekly_variety()
+    log.info(f"Week variety — angle: {variety['angle'][:60]}… "
+             f"lighting: {variety['lighting']}")
+    if recent:
+        log.info(f"Avoiding {len(recent)} recent concept(s) from history.")
+
+    concepts = _build_story_concepts(entry, count, anthropic_client,
+                                     avoid=recent, angle=variety["angle"])
+    concepts = _filter_similar_concepts(concepts, recent)
+    if concepts and len(concepts) < count:
+        needed = count - len(concepts)
+        log.info(f"{needed} concept(s) dropped as near-duplicates; "
+                 f"requesting replacements.")
+        extra = _build_story_concepts(entry, needed, anthropic_client,
+                                      avoid=recent + concepts,
+                                      angle=variety["angle"])
+        concepts += _filter_similar_concepts(extra, recent + concepts)
+        concepts = concepts[:count]
     if not concepts:
         log.warning("No concepts produced, skipping images.")
         return []
@@ -1099,7 +1336,8 @@ def generate_image_candidates(entry: dict, token: str,
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(concepts)) as pool:
         futures = {}
         for i, c in enumerate(concepts, 1):
-            p = _IMAGE_STYLE_TEMPLATE.format(concept=c)
+            p = _IMAGE_STYLE_TEMPLATE.format(concept=c,
+                                             lighting=variety["lighting"])
             futures[pool.submit(_generate_one_image, p, i)] = i
         for fut in concurrent.futures.as_completed(futures):
             idx = futures[fut]
@@ -1121,6 +1359,11 @@ def generate_image_candidates(entry: dict, token: str,
         if url:
             image_urls.append(url)
             log.info(f"  Uploaded candidate #{i}: {url}")
+
+    # Remember this week's briefs so next week's images look different.
+    if image_urls:
+        history.append({"date": today, "concepts": concepts})
+        _save_concept_history(history)
 
     return image_urls
 
