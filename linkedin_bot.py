@@ -45,7 +45,10 @@ from news_bot import (
     CONFIG,
     DIVISION_COLOURS,
     DIVISION_LABELS,
+    _swap_firm_for_company,
 )
+
+import style_guard
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -173,7 +176,7 @@ You are writing a LinkedIn post AS Wolf Jansen — speaking in the first person 
 ("we", "our", "in our experience") on behalf of the company page.
 
 ## Who we are
-Wolf Jansen is a specialist recruitment firm focused on the DACH region
+Wolf Jansen is a specialist recruitment company focused on the DACH region
 (Germany, Austria, Switzerland). We operate across three divisions: SAP,
 Data & Digital, and Financial & Advisory. We have been recruiting in Germany
 since 2000. We are true headhunters — we do not rely on job boards. We target
@@ -629,22 +632,23 @@ every rule in the system prompt. Return JSON only.
     if not result or not result.get("post_text"):
         return result
 
-    # Belt-and-braces #1: scrub em/en dashes even if Opus slipped.
-    # Em dash (—, U+2014) and stray en dashes (–, U+2013) are classic AI tells.
-    result["post_text"] = _scrub_dashes(result["post_text"])
+    # Belt-and-braces #1: scrub em/en dashes and firm→company even if Opus slipped.
+    result["post_text"] = _swap_firm_for_company(_scrub_dashes(result["post_text"]))
 
-    # Belt-and-braces #2: scan for banned rhetorical patterns. If any hit, do
-    # ONE feedback-driven retry pointing the offending fragments out to Opus.
-    # We accept the retry output even if it still has hits — the workflow
-    # should not block on perfect compliance — but we log loudly so we can see
-    # repeat offenders in the Actions output.
+    # Belt-and-braces #2: scan for banned patterns with the shared style guard
+    # (the same unified detector the news bot uses). Up to TWO feedback-driven
+    # retries quoting the offending fragments; keep the cleanest draft seen.
+    # Whatever survives is attached as style_warnings and shown on the approval
+    # email card — a dirty draft must never look identical to a clean one.
     hits = _detect_banned_patterns(result["post_text"])
-    if hits:
+    attempts = 0
+    while hits and attempts < 2:
+        attempts += 1
         log.warning(
-            f"Draft contained {len(hits)} banned rhetorical pattern(s), retrying. "
-            f"Examples: {hits[:5]}"
+            f"Draft contained {len(hits)} banned pattern(s) "
+            f"(attempt {attempts}), retrying. Examples: {hits[:5]}"
         )
-        feedback = "\n".join(f'  - "{h}"' for h in hits[:6])
+        feedback = "\n".join(f'  - {h}' for h in hits[:10])
         retry_message = user_message + f"""
 
 YOUR PREVIOUS DRAFT VIOLATED THE BAN. These fragments are NOT allowed:
@@ -716,17 +720,22 @@ doesn't.
 Return JSON only.
 """
         retry = _opus_linkedin_call(client, retry_message)
-        if retry and retry.get("post_text"):
-            retry["post_text"] = _scrub_dashes(retry["post_text"])
-            still = _detect_banned_patterns(retry["post_text"])
-            if still:
-                log.warning(
-                    f"Retry STILL contained {len(still)} banned pattern(s): {still[:5]}. "
-                    f"Accepting anyway to avoid blocking the run."
-                )
-            return retry
-        log.warning("Retry call failed — returning original (possibly banned) draft.")
+        if not retry or not retry.get("post_text"):
+            log.warning("Retry call failed — keeping previous draft.")
+            break
+        retry["post_text"] = _swap_firm_for_company(_scrub_dashes(retry["post_text"]))
+        retry_hits = _detect_banned_patterns(retry["post_text"])
+        if len(retry_hits) < len(hits):
+            result, hits = retry, retry_hits   # accept the cleaner draft
+        else:
+            # Keep the previous (cleaner or equal) draft but spend the
+            # remaining attempt rather than giving up straight away.
+            log.warning(f"Retry no cleaner ({len(retry_hits)} vs {len(hits)}), "
+                        f"keeping previous draft.")
 
+    result["style_warnings"] = hits
+    if hits:
+        log.warning(f"UNRESOLVED tells going to review: {hits[:6]}")
     return result
 
 
@@ -752,238 +761,14 @@ def _opus_linkedin_call(client: anthropic.Anthropic, user_message: str) -> Optio
 
 
 def _detect_banned_patterns(text: str) -> list[str]:
-    """Find banned contrastive / rhetorical patterns in LinkedIn post text.
+    """Find banned AI-writing patterns in LinkedIn post text.
 
-    Returns a list of matched fragments. Empty list means clean. The patterns
-    here mirror the BANNED RHETORICAL PATTERNS section of LINKEDIN_SYSTEM_PROMPT
-    so that prompt drift in Opus 4.5 doesn't silently leak AI tells onto the
-    Wolf Jansen company page.
+    Detection lives in style_guard.py, shared with news_bot, so both bots
+    enforce the identical unified pattern set (each previously had its own
+    list and each missed tells the other caught). Returns 'label: "fragment"'
+    strings; empty list means clean.
     """
-    import re as _re
-    hits: list[str] = []
-
-    # (A) Cross-sentence contrastive hook:  "X isn't Y. It's Z."
-    #     Variants: isn't / is not / aren't / are not / wasn't / was not
-    #     Pivot:    It's / It is / That's / That is / They're / They are / Those are
-    p_a = _re.compile(
-        r"\b(?:isn['’]t|is not|aren['’]t|are not|wasn['’]t|was not)\b"
-        r"[^.?!\n]{1,120}[.?!]\s+"
-        r"(?:It['’]s|It is|That['’]s|That is|They['’]re|They are|Those are)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_a.finditer(text)]
-
-    # (B) In-sentence contrast: "not X, (it's|but|rather|but rather) Y"
-    p_b = _re.compile(
-        r"\bnot\s+[A-Za-z][^,.?!\n]{2,90},\s*"
-        r"(?:it['’]s|it is|but(?:\s+rather)?|rather)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_b.finditer(text)]
-
-    # (C) "not just / not only / not merely / not simply" framing
-    p_c = _re.compile(r"\bnot\s+(?:just|only|merely|simply)\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_c.finditer(text)]
-
-    # (D) "Less about X. More about Y." paired-sentence contrast
-    p_d = _re.compile(
-        r"\bLess\s+about\b[^.?!\n]{1,90}[.?!]\s+More\s+about\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_d.finditer(text)]
-
-    # (E) "This isn't / This is not" sentence opener — almost always a setup
-    #     for a contrast even if the contrast lands later. Flag and let the
-    #     retry decide if it's load-bearing.
-    p_e = _re.compile(r"\bThis\s+(?:isn['’]t|is not)\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_e.finditer(text)]
-
-    # (F) Bare "we're (seeing|hearing|noticing|watching|learning|finding|
-    #     observing|telling)" framing. The existing (E) catches "Here's what
-    #     we're seeing" — this catches the unframed cousin: "In our practice,
-    #     we're seeing boards shift..." etc.
-    p_f = _re.compile(
-        r"\bwe[’']re\s+(?:seeing|hearing|noticing|watching|learning|finding|observing|telling)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_f.finditer(text)]
-
-    # (G) "What makes X worth (watching|noting|paying attention to|heeding)"
-    #     and "what makes X interesting/notable/different/stand out".
-    p_g = _re.compile(
-        r"\bwhat\s+makes\s+[A-Za-z][^.?!\n]{2,80}\s+"
-        r"(?:worth\s+(?:watching|noting|paying|heeding|reading)|"
-        r"interesting|notable|different|stand\s+out|stands?\s+out)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_g.finditer(text)]
-
-    # (H) Reversed contrast: copula + noun phrase + ", not " + noun phrase.
-    #     Catches "this is X, not Y", "it's X, not Y", "that's resource
-    #     reallocation toward AI capability, not defensive cost-cutting".
-    p_h = _re.compile(
-        r"\b(?:is|are|was|were)\s+[a-z][^.?!\n]{2,80},\s+not\s+[a-zA-Z]",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_h.finditer(text)]
-
-    # (I) "The (real|key|big|larger|broader)? question (is|becomes|we're
-    #     asking)" — question-as-statement throat-clearing.
-    p_i = _re.compile(
-        r"\b[Tt]he\s+(?:real\s+|key\s+|big\s+|larger\s+|broader\s+)?question\s+"
-        r"(?:is(?:\s+whether)?|becomes|we[’']re\s+asking)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_i.finditer(text)]
-
-    # (J) "What's (really|particularly)? (interesting|notable|striking|telling)
-    #     is" / "what stands out is" / "the interesting thing is".
-    p_j = _re.compile(
-        r"\bwhat[’']?s\s+(?:really\s+|particularly\s+)?"
-        r"(?:interesting|notable|striking|telling|surprising)\s+is\b"
-        r"|\bwhat\s+stands?\s+out\s+(?:here\s+)?is\b"
-        r"|\bthe\s+interesting\s+thing\s+(?:here\s+)?is\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_j.finditer(text)]
-
-    # (K) "increasingly" — banned in prompt's BANNED WORDS list but the model
-    #     still slips it in. Catch programmatically.
-    p_k = _re.compile(r"\bincreasingly\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_k.finditer(text)]
-
-    # (L) "is a (concrete|clear|loud|strong|important|key|major) signal" —
-    #     same family as the existing "the signal is..." ban. Catches noun-
-    #     form variants the prompt doesn't already cover.
-    p_l = _re.compile(
-        r"\b(?:is|are|that[’']s|this\s+is|it[’']s)\s+(?:a|an)\s+(?:\w+\s+)?signal\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_l.finditer(text)]
-
-    # (M) "[Time] ago, X. Now/Today Y." then/now contrast structure.
-    p_m = _re.compile(
-        r"\b\w+\s+(?:months?|years?|quarters?|weeks?|decades?)\s+ago\b"
-        r"[^.?!\n]{1,120}[.?!]\s+(?:Now|Today)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_m.finditer(text)]
-
-    # (N) "In our [X] practice" opener — overused WJ-positioning tic. Catches
-    #     "In our SAP practice", "In our Financial & Advisory practice",
-    #     "In our Data & Digital practice", etc.
-    p_n = _re.compile(
-        r"\bIn\s+our\s+[A-Z][A-Za-z&\s]{1,30}\s+practice\b",
-    )
-    hits += [m.group(0) for m in p_n.finditer(text)]
-
-    # (O) "into the conversation" / "gets you into the conversation" — tic
-    #     that has appeared in multiple consecutive posts. Phrase-level ban.
-    p_o = _re.compile(r"\binto\s+the\s+conversation\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_o.finditer(text)]
-
-    # (P) "has moved from X to Y" / "have moved from X to Y" abstract-contrast
-    #     cadence. Restricted to the present-perfect form ("has/have moved")
-    #     to keep false-positive risk low; literal location moves ("she
-    #     moved from London to Berlin") won't match.
-    p_p = _re.compile(
-        r"\b(?:has|have)\s+moved\s+from\s+[^.?!\n]{2,80}\s+to\s+\w+",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_p.finditer(text)]
-
-    # (Q) "the [noun] signal" — e.g. "the hiring signal is clear". Complements
-    #     (L), which only catches the "is a ... signal" noun form.
-    p_q = _re.compile(r"\bthe\s+\w+\s+signal\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_q.finditer(text)]
-
-    # (R) "the [noun] is clear" sign-off ("the signal is clear", "the picture is
-    #     clear"). Deliberately broad; the retry decides if it's load-bearing.
-    p_r = _re.compile(r"\bthe\s+\w+\s+is\s+clear\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_r.finditer(text)]
-
-    # (S) Abstract-motion: significance verb bolted onto an abstract noun.
-    p_s = _re.compile(
-        r"\bthe\s+\w+\s+is\s+(?:tilting|shifting|narrowing|widening|closing|shrinking)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_s.finditer(text)]
-
-    # (T) "the window ... narrowing/closing/shrinking" metaphor.
-    p_t = _re.compile(r"\bthe window\b[^.?!\n]{0,80}\b(?:narrow|clos|shrink)", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_t.finditer(text)]
-
-    # (U) "X matters" pronouncement ("the timing matters", "that matters").
-    p_u = _re.compile(
-        r"\b(?:that|this|the timing|the distinction|the difference|the nuance|the gap|the context)\s+matters\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_u.finditer(text)]
-
-    # (V) Reworded pivot "neither X ... but Y".
-    p_v = _re.compile(r"\bneither\b[^.?!\n]{1,90}\bbut\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_v.finditer(text)]
-
-    # (W) Reworded pivot "is/are (not) wrong, but Y".
-    p_w = _re.compile(r"\b(?:is|are)\s+(?:not\s+)?wrong,\s*but\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_w.finditer(text)]
-
-    # (X) Surface-reading setups "the subtext is" / "the real story is".
-    p_x = _re.compile(r"\bthe\s+(?:subtext|real story)\s+is\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_x.finditer(text)]
-
-    # (Y) "framing is about ..." setup.
-    p_y = _re.compile(r"\bframing is about\b", _re.IGNORECASE)
-    hits += [m.group(0) for m in p_y.finditer(text)]
-
-    # (Z) Vague comparison attribution: "than benchmarks/the data suggest".
-    p_z = _re.compile(
-        r"\bthan\s+(?:benchmarks?|the data|the numbers?|metrics?|reports?)\s+suggests?\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_z.finditer(text)]
-
-    # (AA) Rule-of-three placement claim: "three" as the count of our mandates,
-    #      briefs, roles, placements, consultants. Also "(N) of our last three"
-    #      and "we (have) placed three". Vary the count; never default to three.
-    p_aa = _re.compile(
-        r"\bthree\b[^.?!\n]{0,40}\b(?:mandates?|briefs?|roles?|placements?|consultants?|hires?|searches?|candidates?|clients?)\b"
-        r"|\bof our (?:last|recent)\s+three\b"
-        r"|\bwe(?:['’]ve| have)?\s+placed\s+three\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_aa.finditer(text)]
-
-    # (AB) Novelty line: "did not exist ... ago" / "barely existed ... ago" /
-    #      "would not have existed/appeared".
-    p_ab = _re.compile(
-        r"\b(?:did|does)\s*n[o'’]?t\s+exist\b[^.?!\n]{0,80}\bago\b"
-        r"|\bago\b[^.?!\n]{0,80}\b(?:did|does)\s*n[o'’]?t\s+exist\b"
-        r"|\bbarely existed\b"
-        r"|\bwould not have (?:existed|appeared)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_ab.finditer(text)]
-
-    # (AC) "rare/scarce skill combination" framing and "profiles are scarce".
-    p_ac = _re.compile(
-        r"\bcombination\b[^.?!\n]{0,30}\b(?:is|are|was|were|remains?)\s+(?:rare|scarce|uncommon|hard(?:er)? to find)\b"
-        r"|\b(?:rare|scarce|uncommon)\s+(?:skill\s+)?combination\b"
-        r"|\b(?:profile|profiles|candidates?|specialists?)\b[^.?!\n]{0,20}\b(?:are|is|remain|remains)\s+(?:scarce|rare|uncommon|thin on the ground)\b",
-        _re.IGNORECASE,
-    )
-    hits += [m.group(0) for m in p_ac.finditer(text)]
-
-    # (AD) Dual-audience sign-off: "For candidates ... For hiring managers ..."
-    #      (either order). The default close that makes every post identical.
-    p_ad = _re.compile(
-        r"for candidates\b.{0,600}for hiring managers\b"
-        r"|for hiring managers\b.{0,600}for candidates\b",
-        _re.IGNORECASE | _re.DOTALL,
-    )
-    hits += [m.group(0) for m in p_ad.finditer(text)]
-
-    return hits
+    return style_guard.format_hits(style_guard.detect(text, context="linkedin"))
 
 
 def _scrub_dashes(text: str) -> str:
@@ -1484,7 +1269,8 @@ def _image_thumbnails_row_html(token: str, image_urls: list[str]) -> str:
     </table>"""
 def _linkedin_card_html(token: str, post_text: str, entry: dict,
                          wp_post_url: Optional[str],
-                         image_urls: Optional[list[str]] = None) -> str:
+                         image_urls: Optional[list[str]] = None,
+                         style_warnings: Optional[list] = None) -> str:
     pa_approve = LINKEDIN_CONFIG["pa_linkedin_approve_url"]
     # "Text-only" approve link: encodes image=none so the PA flow skips the image step.
     approve_text_only_url = _pages_url_approve_image(pa_approve, token, "none")
@@ -1555,6 +1341,7 @@ def _linkedin_card_html(token: str, post_text: str, entry: dict,
     <p style="margin:0 0 14px;font-size:13px;color:#666;">
       Based on: <em>{entry.get("title","")}</em>
     </p>
+    {style_guard.warning_strip_html(style_warnings or [])}
     <hr style="border:none;border-top:1px solid #eee;margin:0 0 16px;">
 
     <!-- LinkedIn-style preview -->
@@ -1593,7 +1380,8 @@ def _linkedin_card_html(token: str, post_text: str, entry: dict,
 
 def send_linkedin_approval_email(token: str, post_text: str, entry: dict,
                                   wp_post_url: Optional[str],
-                                  image_urls: Optional[list[str]] = None):
+                                  image_urls: Optional[list[str]] = None,
+                                  style_warnings: Optional[list] = None):
     smtp_user = CONFIG["smtp_user"]
     smtp_pass = CONFIG["smtp_password"]
     if not (smtp_user and smtp_pass):
@@ -1607,7 +1395,8 @@ def send_linkedin_approval_email(token: str, post_text: str, entry: dict,
     subject    = f"Wolf Jansen LinkedIn draft ready for review, {date_str}"
     recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
 
-    card = _linkedin_card_html(token, post_text, entry, wp_post_url, image_urls)
+    card = _linkedin_card_html(token, post_text, entry, wp_post_url, image_urls,
+                               style_warnings)
 
     html_body = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
@@ -1767,7 +1556,8 @@ def main():
         wp_post_url  = wp_url,
         image_urls   = image_urls,
     )
-    send_linkedin_approval_email(token, rewritten["post_text"], pick, wp_url, image_urls)
+    send_linkedin_approval_email(token, rewritten["post_text"], pick, wp_url,
+                                 image_urls, rewritten.get("style_warnings"))
 
     log.info("=" * 60)
 

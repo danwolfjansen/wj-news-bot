@@ -23,6 +23,8 @@ import uuid
 import fcntl
 import sys
 import base64
+
+import style_guard
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
@@ -1078,11 +1080,20 @@ the body with a link back to the original source at {story['link']}.
             if len(retry_tells) < len(tells):
                 result, tells = retry, retry_tells   # accept the cleaner draft
             else:
+                # Keep the previous (cleaner or equal) draft but spend the
+                # remaining attempt rather than giving up straight away.
                 log.warning("  Corrective rewrite no cleaner, keeping previous draft")
-                break
         # Hard-reject banned headline patterns and regenerate title only.
         if isinstance(result, dict) and result.get("title"):
             result["title"] = _enforce_headline(result["title"], story, client)
+        # Anything that survived the retries is surfaced on the approval email
+        # card so it can be reviewed by a human before publishing — a dirty
+        # draft must never reach the inbox looking identical to a clean one.
+        if isinstance(result, dict):
+            result["style_warnings"] = _detect_ai_tells(result)
+            if result["style_warnings"]:
+                log.warning(f"  UNRESOLVED tells going to review: "
+                            f"{result['style_warnings'][:6]}")
         return result
     except Exception as e:
         log.error(f"  Rewrite failed for '{story['title']}': {e}")
@@ -1145,132 +1156,26 @@ def _swap_firm_for_company(text: str) -> str:
     return _re.sub(r"\bfirms?\b", _f, text, flags=_re.IGNORECASE)
 
 
-# Patterns that mark machine-generated prose, aligned to Wolf Jansen's
-# "ANTI AI WRITING STYLE" guide (the Wikipedia "Signs of AI writing" field
-# guide). Grouped by the guide's sections. Each hit triggers a corrective
-# rewrite, not a hard reject, so broad coverage is acceptable.
-_AI_TELL_PATTERNS = [
-    # --- Negative parallelisms / contrastive reversals (guide: AIPARALLEL) ---
-    ("neg-parallel 'not just X'",            r"\bnot just\b"),
-    ("neg-parallel 'not only X but'",        r"\bnot only\b[^.!?]*\bbut\b"),
-    ("neg-parallel 'X, not Y'",              r",\s+not\s+(?:a |an |the |just )?\w+"),
-    ("neg-parallel \"isn't X, it's Y\"",     r"\bis(?:n't| not)\b[^.!?]*,\s*(?:it'?s|its|but|rather)\b"),
-    ("neg-parallel 'no longer X but/it's Y'", r"\bno longer\b[^.!?]*\b(?:but|it'?s|its|they'?re|rather)\b"),
-    ("'no longer sufficient/enough'",        r"\bno longer\s+(?:sufficient|enough|adequate)\b"),
-    ("'not sufficient / alone is not enough'", r"\b(?:not sufficient|alone is not enough)\b"),
-    ("'on the surface ... but'",             r"\bon the surface\b"),
-    ("'shifted/changed rather than'",        r"\b(?:shifted|changed|moved|grown)\s+rather than\b"),
-    # --- Short 'profound' fragment tells ---
-    ("fragment \"until it doesn't\"",        r"until it doesn'?t"),
-    ("fragment 'is a symptom'",              r"\bis a symptom\b"),
-    ("fragment 'litmus test'",               r"\blitmus test\b"),
-    ("fragment 'the cracks show'",           r"\bthe cracks show\b"),
-    ("fragment 'framing matters'",           r"\bframing matters\b"),
-    ("fragment 'was never the hard part'",   r"\bwas never the (?:hard part|main constraint|point)\b"),
-    ("cliché 'table stakes'",                r"\btable stakes\b"),
-    # --- Rhetorical setups / meta-narration ---
-    ("'the (real/underlying) question is'",  r"\bthe (?:underlying |real )?question\b[^.!?]{0,90}\bis\b"),
-    ("'the implication/takeaway is clear'",  r"\bthe (?:implication|takeaway|lesson|message)s? (?:is|are|here is) clear\b"),
-    ("\"Here's the/what\"",                  r"here'?s (?:the|what)\b"),
-    ("meta 'play(ing) out'",                 r"\bplay(?:ing|ed)? out\b"),
-    ("meta 'unfold'",                        r"\bunfold(?:s|ing|ed)?\b"),
-    ("meta 'in real time'",                  r"\bin real[\s-]?time\b"),
-    ("meta 'we are watching'",               r"\bwe(?:'re| are) watching\b"),
-    ("'the/clear signal'",                   r"\bthe signal\b|\bclear signal\b"),
-    # --- Filler demand-signal / vague "we're seeing" observation openers ---
-    ("filler 'fielding briefs/mandates'",    r"\bfielding\s+(?:briefs?|mandates?|requests?)\b"),
-    ("filler 'reflect(s) this shift'",       r"\breflect(?:s|ing)?\s+this\s+shift\b"),
-    ("vague 'we are seeing/observing'",      r"\bwe(?:'re| are)\s+(?:already\s+|increasingly\s+|now\s+|also\s+|currently\s+|still\s+)?(?:seeing|observing|noticing|hearing|witnessing)\b"),
-    ("vague 'we have seen/noticed'",         r"\bwe(?:'ve| have)\s+(?:been\s+)?(?:seen|noticed|observed|tracked|tracking|been seeing|been tracking|started seeing)\b"),
-    ("vague 'we see this/it'",               r"\bwe see (?:this|it)\b"),
-    # --- Significance / legacy puffery (guide: Undue emphasis) ---
-    ("puffery 'stands/serves as'",           r"\b(?:stands|serves)\s+as\b"),
-    ("puffery 'is a testament/reminder'",    r"\bis a (?:testament|reminder)\b"),
-    ("puffery 'underscores/highlights'",     r"\b(?:underscore|underscores|underscoring|highlights|highlighting)\b"),
-    ("puffery 'pivotal/turning point'",      r"\b(?:pivotal|key turning point)\b"),
-    ("puffery 'evolving landscape'",         r"\bevolving landscape\b"),
-    ("puffery 'marks a shift'",              r"\bmarks? a shift\b"),
-    ("puffery 'setting the stage'",          r"\bsetting the stage\b"),
-    # --- Superficial present-participle tails (guide: Superficial analyses) ---
-    ("participle tail ', -ing'",             r",\s*(?:highlighting|underscoring|emphasi[sz]ing|reflecting|symboli[sz]ing|signal(?:l)?ing|ensuring|fostering|demonstrating|showcasing|cementing|solidifying|reinforcing)\b"),
-    # --- Vague attribution (guide: AIWEASEL) ---
-    ("vague attribution",                    r"\b(?:industry reports?|observers (?:have )?(?:cited|noted)|experts (?:argue|say|agree)|some critics|widely (?:regarded|seen|considered))\b"),
-    # --- Outline conclusions (guide: challenges/future) ---
-    ("outline 'despite challenges/success'", r"\bdespite (?:its|their|these) (?:challenges|success)\b"),
-    ("outline 'future outlook'",             r"\bfuture outlook\b"),
-    # --- Section summaries (guide) ---
-    ("'in summary/conclusion/overall'",      r"\b(?:in summary|in conclusion|overall,)\b"),
-    # --- Didactic disclaimers (guide) ---
-    ("didactic 'it's important to note'",    r"\bit'?s (?:important|crucial|worth)\s+(?:to note|noting|remembering|considering)\b"),
-    ("'worth noting/heeding'",               r"\bworth (?:noting|heeding|paying attention)\b"),
-    # --- AI vocabulary (guide: overused words) ---
-    ("ai-vocab",                             r"\b(?:leverage|leverages|leveraging|delve|delving|tapestry|vibrant|seamless|seamlessly|garner(?:ed|ing)?|foster(?:s|ing|ed)?|showcas(?:e|es|ing|ed)|intricat(?:e|ies)|interplay|realm|navigat(?:e|es|ing|ed)|underpin(?:s|ned|ning)?|myriad|bespoke|robust)\b"),
-    # --- Reworded pivots / abstract-motion (CFO-slop class, regex-dodgers) ---
-    ("'the X signal'",                       r"\bthe\s+\w+\s+signal\b"),
-    ("'the X is clear' sign-off",            r"\bthe\s+\w+\s+is\s+clear\b"),
-    ("abstract-motion 'X is tilting/widening'", r"\bthe\s+\w+\s+is\s+(?:tilting|shifting|narrowing|widening|closing|shrinking)\b"),
-    ("metaphor 'the window' (closing)",      r"\bthe window\b[^.!?]*\b(?:narrow|clos|shrink)"),
-    ("fragment 'X matters' pronouncement",   r"\b(?:that|this|the timing|the distinction|the difference|the nuance|the gap|the context)\s+matters\b"),
-    ("reworded 'neither X ... but'",         r"\bneither\b[^.!?]*\bbut\b"),
-    ("reworded 'is/are (not) wrong, but'",   r"\b(?:is|are)\s+(?:not\s+)?wrong,\s*but\b"),
-    ("setup 'the subtext/real story is'",    r"\bthe\s+(?:subtext|real story)\s+is\b"),
-    ("setup 'framing is about'",             r"\bframing is about\b"),
-    ("vague 'than benchmarks/data suggest'", r"\bthan\s+(?:benchmarks?|the data|the numbers?|metrics?|reports?)\s+suggests?\b"),
-    # --- Templated WJ evidence / cross-post repetition (anti-formula) ---
-    ("rule-of-three placement claim",        r"\bthree\b[^.!?]{0,40}\b(?:mandates?|briefs?|roles?|placements?|consultants?|hires?|searches?|candidates?|clients?)\b"),
-    ("'(N) of our last/recent three'",       r"\bof our (?:last|recent)\s+three\b"),
-    ("'we (have) placed three'",             r"\bwe(?:'ve| have)?\s+placed\s+three\b"),
-    ("novelty 'did not exist ... ago'",      r"\b(?:did|does)\s*n[o']?t\s+exist\b[^.!?]{0,80}\bago\b|\bago\b[^.!?]{0,80}\b(?:did|does)\s*n[o']?t\s+exist\b"),
-    ("novelty 'barely existed / would not have'", r"\bbarely existed\b|\bwould not have (?:existed|appeared)\b"),
-    ("'rare/scarce skill combination'",      r"\bcombination\b[^.!?]{0,30}\b(?:is|are|was|were|remains?)\s+(?:rare|scarce|uncommon|hard(?:er)? to find)\b|\b(?:rare|scarce|uncommon)\s+(?:skill\s+)?combination\b"),
-    ("'profiles/candidates are scarce'",     r"\b(?:profile|profiles|candidates?|specialists?)\b[^.!?]{0,20}\b(?:are|is|remain|remains)\s+(?:scarce|rare|uncommon|thin on the ground)\b"),
-    ("dual 'for candidates ... for hiring'", r"for candidates\b.{0,600}for hiring managers\b|for hiring managers\b.{0,600}for candidates\b"),
-    # --- Concessive pivot spread across two sentences (concede-then-elevate) ---
-    # The top current leak: dodges the "not X, but Y" regexes by splitting the
-    # reversal over a full stop ("Those remain foundational. What has changed is Y").
-    ("concessive 'remain(s) foundational/essential'", r"\bremains?\s+(?:foundational|essential|valuable|important|critical|central|relevant|the baseline)\b"),
-    ("concessive 'those/these remain/still'", r"\b(?:those|these)\s+(?:remain\b|still\s+(?:matter|count|apply|hold))"),
-    ("concessive 'still matters/counts'",    r"\bstill\s+(?:matters?|counts?|applies|hold(?:s)? true)\b"),
-    ("concessive 'what has changed is'",     r"\bwhat(?:'s| has| have)?\s+changed\s+is\b"),
-    ("concessive 'become the separator'",    r"\bbecom(?:e|es|ing)\s+the\s+(?:separator|differentiator|dividing line)\b"),
-    # --- Pointer-sentence: demonstrative + significance verb at sentence start ---
-    ("pointer-sentence 'That/This X signals'", r"(?:^|[.!?]\s+)(?:that|this|such)\s+(?:\w+\s+){0,2}(?:also\s+)?(?:signals?|means\b|matters\b|appears?\b|creates?|changes?|translates?\s+into|reflects?|reshapes?|underscores?)\b"),
-    ("aphorism 'pays the bills'",            r"\bpays?\s+the\s+bills\b"),
-    # --- Dismiss-then-elevate opener ---
-    ("dismiss 'sounds like plumbing/boring'", r"\bsounds?\s+like\b[^.!?]*\b(?:plumbing|housekeeping|boring|mundane|dull|a footnote)\b"),
-    ("dismiss 'Another X, another Y'",       r"\banother\b[^,.!?]{0,40},\s*another\b"),
-    # --- House style ---
-    ("'firm'/'firms'",                       r"\bfirms?\b"),
-    ("em dash leak",                         r"—"),
-]
-
-
+# AI-tell detection now lives in style_guard.py, shared with linkedin_bot so
+# both bots enforce the identical, unified pattern set (previously each bot
+# had its own list and each missed tells the other caught).
 def _detect_ai_tells(result: dict) -> list:
-    """Return labels of any banned AI writing patterns found in the draft."""
-    import re as _re
+    """Return 'label: "fragment"' strings for banned AI patterns in the draft.
+    Quoting the actual offending fragment makes the corrective re-prompt far
+    more reliable than naming the abstract pattern."""
     if not isinstance(result, dict):
         return []
-    parts = [result.get(f) for f in ("title", "excerpt", "body")
-             if isinstance(result.get(f), str)]
-    text = " ".join(parts)
-    text = _re.sub(r"<[^>]+>", " ", text)   # strip HTML tags
-    text = _re.sub(r"\s+", " ", text)       # normalise whitespace
-    found = []
-    for label, pat in _AI_TELL_PATTERNS:
-        if _re.search(pat, text, _re.IGNORECASE):
-            found.append(label)
-    # 'brief'/'briefs' is acceptable once; flag overuse (the default evidence noun).
-    if len(_re.findall(r"\bbriefs?\b", text, _re.IGNORECASE)) > 1:
-        found.append("overused 'brief'/'briefs' (appears more than once)")
-    return found
+    hits = style_guard.detect_fields(result, context="news")
+    return style_guard.format_hits(hits)
 
 
 def _build_correction_message(tells: list) -> str:
-    """Build a corrective re-prompt listing the detected tells."""
+    """Build a corrective re-prompt quoting the detected tells."""
     bullet_list = "\n".join(f"  - {t}" for t in tells)
     return (
         "Your draft still contains AI writing tells that are banned in the Wolf "
-        "Jansen style guide. These patterns were detected:\n"
+        "Jansen style guide. The automated checker found these EXACT fragments "
+        "(quoted from your draft) — every one must be gone from the rewrite:\n"
         f"{bullet_list}\n\n"
         "Rewrite the post to remove ALL of them. Specifically:\n"
         "- Never define something by what it is not. Banned in every form: "
@@ -1349,7 +1254,7 @@ def _pages_url(action: str, pa_url: str, token: str, post_id) -> str:
     return f"{_PAGES_BASE}/{action}.html?url={encoded}&token={token}&post_id={pid}"
 
 def _post_card_html(token: str, title: str, excerpt: str, body: str,
-                    division: str, post_id=None) -> str:
+                    division: str, post_id=None, style_warnings=None) -> str:
     approve_url = _pages_url("approve", CONFIG["pa_approve_url"], token, post_id)
     reject_url  = _pages_url("reject",  CONFIG["pa_reject_url"],  token, post_id)
 
@@ -1369,6 +1274,8 @@ def _post_card_html(token: str, title: str, excerpt: str, body: str,
       <!-- Division label -->
       <p style="margin:0 0 6px; font-size:11px; font-weight:700; letter-spacing:0.08em;
                 text-transform:uppercase; color:{colour};">{label}</p>
+
+      {style_guard.warning_strip_html(style_warnings or [])}
 
       <!-- Title -->
       <h2 style="margin:0 0 12px; font-size:19px; font-weight:700;
@@ -1432,7 +1339,7 @@ def send_approval_email(new_drafts: list[dict]):
 
     cards_html = "\n".join(
         _post_card_html(d["token"], d["title"], d["excerpt"], d["body"],
-                        d["division"], d.get("post_id"))
+                        d["division"], d.get("post_id"), d.get("style_warnings"))
         for d in new_drafts
     )
 
@@ -1597,6 +1504,7 @@ def main():
                     "excerpt":  rewritten["excerpt"],
                     "body":     rewritten["body"],
                     "division": division_key,
+                    "style_warnings": rewritten.get("style_warnings", []),
                 })
                 log.info(f"  ✓ Draft saved: '{rewritten['title']}'")
 
