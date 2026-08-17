@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Wolf Jansen — Approving LinkedIn post</title>
+  <meta name="robots" content="noindex, nofollow">
+  <title>Wolf Jansen — Approve LinkedIn post</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -25,20 +26,44 @@
     }
     .icon { font-size: 52px; margin-bottom: 16px; }
     h1 { color: #1a1a1a; font-size: 22px; margin: 0 0 12px; }
-    p  { color: #666; font-size: 15px; line-height: 1.5; margin: 0; }
+    p  { color: #666; font-size: 15px; line-height: 1.5; margin: 0 0 8px; }
+    button {
+      margin-top: 20px;
+      padding: 14px 32px;
+      background: #0A66C2;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .small { font-size: 12px; color: #999; margin-top: 16px; }
+    .small a { color: #999; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon" id="icon">⏳</div>
-    <h1 id="title">Posting to LinkedIn…</h1>
-    <p  id="msg">Please wait a moment.</p>
+    <div class="icon" id="icon">💼</div>
+    <h1 id="title">Post to LinkedIn?</h1>
+    <p  id="msg">This will publish the post to the Wolf Jansen company page.</p>
+    <button id="go" class="hidden">✓ Yes, post it</button>
+    <p class="small hidden" id="note"></p>
   </div>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
+    // This page deliberately does NOTHING on load. The Power Automate webhook
+    // only fires on an explicit tap of the button below. Auto-firing on load
+    // let email-client link prefetchers, refreshes and re-taps trigger the
+    // flow repeatedly — which published duplicate posts (2026-08-17).
+    const params  = new URLSearchParams(window.location.search);
     const encoded = params.get('url');
     const token   = params.get('token');
+    const btn     = document.getElementById('go');
+    const note    = document.getElementById('note');
 
     function show(icon, title, msg) {
       document.getElementById('icon').textContent  = icon;
@@ -46,13 +71,45 @@
       document.getElementById('msg').textContent   = msg;
     }
 
-    if (!encoded || !token) {
-      show('❌', 'Invalid link', 'This approval link is missing required information.');
-    } else {
-      const paUrl = atob(encoded) + '&token=' + encodeURIComponent(token);
+    function fire() {
+      btn.disabled = true;
+      btn.textContent = 'Working…';
+      show('⏳', 'Posting to LinkedIn…', 'Please wait a moment.');
+      const postId = params.get('post_id') || '';
+      let paUrl = atob(encoded) + '&token=' + encodeURIComponent(token);
+      if (postId) paUrl += '&post_id=' + encodeURIComponent(postId);
       fetch(paUrl, { method: 'GET', mode: 'no-cors' })
-        .then(() => show('✅', 'Posted to LinkedIn', 'The post is being published to the Wolf Jansen company page.'))
-        .catch(() => show('❌', 'Something went wrong', 'Please try again or approve on desktop.'));
+        .then(() => {
+          try { localStorage.setItem('wj-done-' + token, '1'); } catch (e) {}
+          btn.classList.add('hidden');
+          show('✅', 'Posted to LinkedIn', 'The post is being published to the Wolf Jansen company page.');
+        })
+        .catch(() => {
+          btn.disabled = false;
+          btn.textContent = '✓ Yes, post it';
+          show('❌', 'Something went wrong', 'Please tap the button to try again.');
+          btn.classList.remove('hidden');
+        });
+    }
+
+    if (!encoded || !token) {
+      show('❌', 'Invalid link', 'This link is missing required information.');
+    } else {
+      let done = false;
+      try { done = localStorage.getItem('wj-done-' + token) === '1'; } catch (e) {}
+      if (done) {
+        show('✅', 'Already actioned', 'This link was already used on this device.');
+        note.innerHTML = 'If the first attempt failed, you can <a href="#" id="again">run it again</a>.';
+        note.classList.remove('hidden');
+        document.getElementById('again').addEventListener('click', function (e) {
+          e.preventDefault();
+          note.classList.add('hidden');
+          fire();
+        });
+      } else {
+        btn.classList.remove('hidden');
+        btn.addEventListener('click', fire);
+      }
     }
   </script>
 </body>

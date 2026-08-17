@@ -796,29 +796,38 @@ def create_wp_draft(title: str, body: str, excerpt: str, division: str) -> Optio
         "categories": [26, category_id],  # 26 = Latest News parent category
     }
 
-    try:
-        resp = _requests.post(
-            f"{wp_url}/wp-json/wp/v2/posts?lang=en",
-            json=payload,
-            headers={
-                "Authorization": f"Basic {credentials}",
-                "Accept":        "application/json",
-                "User-Agent":    "Mozilla/5.0 (compatible; WJNewsBot/1.0)",
-            },
-            timeout=30,
-        )
-        if not resp.ok:
-            log.error(
-                f"  WP draft creation failed: {resp.status_code} {resp.reason} — "
-                f"response body: {resp.text[:400]}"
+    # Retry up to 3 times: a missing post_id forces Power Automate onto its
+    # non-idempotent create-on-approve fallback, which is how three fires of
+    # one approval link published the same post three times on 2026-08-17.
+    # A pre-created draft makes approval a PATCH → publish, safe to repeat.
+    import time as _time
+    last_err = ""
+    for attempt in range(1, 4):
+        try:
+            resp = _requests.post(
+                f"{wp_url}/wp-json/wp/v2/posts?lang=en",
+                json=payload,
+                headers={
+                    "Authorization": f"Basic {credentials}",
+                    "Accept":        "application/json",
+                    "User-Agent":    "Mozilla/5.0 (compatible; WJNewsBot/1.0)",
+                },
+                timeout=30,
             )
-            return None
-        post_id = resp.json()["id"]
-        log.info(f"  ✓ WP draft created: post_id={post_id}")
-        return post_id
-    except Exception as e:
-        log.error(f"  WP draft creation failed: {e}")
-        return None
+            if resp.ok:
+                post_id = resp.json()["id"]
+                log.info(f"  ✓ WP draft created: post_id={post_id}")
+                return post_id
+            last_err = f"{resp.status_code} {resp.reason} — {resp.text[:400]}"
+            log.warning(f"  WP draft creation attempt {attempt}/3 failed: {last_err}")
+        except Exception as e:
+            last_err = str(e)
+            log.warning(f"  WP draft creation attempt {attempt}/3 failed: {e}")
+        if attempt < 3:
+            _time.sleep(5 * attempt)
+    log.error(f"  WP draft creation FAILED after 3 attempts: {last_err} — "
+              f"approval will use the non-idempotent fallback (duplicate risk).")
+    return None
 
 
 def register_draft(token: str, title: str, excerpt: str, body: str,
@@ -1497,6 +1506,11 @@ def main():
                     tags     = rewritten.get("tags", []),
                     division = division_key,
                 )
+                warnings = list(rewritten.get("style_warnings", []))
+                if post_id is None:
+                    warnings.append(
+                        "no WordPress draft pre-created: approving will CREATE "
+                        "the post (tap Approve exactly once — duplicate risk)")
                 new_drafts.append({
                     "token":    token,
                     "post_id":  post_id,   # embedded in approve/reject URLs
@@ -1504,7 +1518,7 @@ def main():
                     "excerpt":  rewritten["excerpt"],
                     "body":     rewritten["body"],
                     "division": division_key,
-                    "style_warnings": rewritten.get("style_warnings", []),
+                    "style_warnings": warnings,
                 })
                 log.info(f"  ✓ Draft saved: '{rewritten['title']}'")
 
