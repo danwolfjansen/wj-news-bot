@@ -123,12 +123,21 @@ class FakeResp:
 
 
 class FakeClient:
-    def __init__(self, replies):
+    """Generator replies pop in order; judge calls (Opus copy-chief system
+    prompt) answer 'clean' by default so gen-call counts stay meaningful."""
+    def __init__(self, replies, judge_replies=None):
         self.replies = list(replies)
+        self.judge_replies = list(judge_replies or [])
         self.calls = []
+        self.judge_calls = 0
         self.messages = self
 
     def create(self, **kw):
+        if "copy chief" in (kw.get("system") or ""):
+            self.judge_calls += 1
+            reply = (self.judge_replies.pop(0) if self.judge_replies
+                     else '{"violations": []}')
+            return FakeResp(reply)
         self.calls.append(kw)
         return FakeResp(self.replies.pop(0))
 
@@ -192,6 +201,25 @@ expect("firm" not in lr2["post_text"].split("#")[0]
 lcard = linkedin_bot._linkedin_card_html("tok", "text", entry, None, None,
                                          lr2["style_warnings"])
 expect("Style guard" in lcard, "linkedin: warning strip renders on email card")
+
+print("\n== 7. Semantic judge layer ==")
+JF = json.dumps({"violations": [{"quote": "puts a number on something leaders have felt",
+                                 "problem": "meta setup frame"}]})
+JP = json.dumps({"violations": []})
+jc = FakeClient([GOOD, GOOD], judge_replies=[JF, JP])
+jr = news_bot.rewrite_story(story, jc)
+expect(len(jc.calls) == 2 and jc.judge_calls == 2,
+       "regex-clean draft rewritten on judge verdict alone")
+expect(jr.get("style_warnings") == [], "judge-clean second draft carries no warnings")
+
+jc2 = FakeClient([GOOD, GOOD, GOOD], judge_replies=[JF, JF, JF])
+jr2 = news_bot.rewrite_story(story, jc2)
+expect(any(w.startswith("judge:") for w in jr2.get("style_warnings", [])),
+       "stubborn judge finding surfaces in style_warnings")
+
+expect(sg.judge_draft(FakeClient([], judge_replies=["not json at all"]),
+                      {"body": "x"}) == [],
+       "unparseable judge output never blocks the pipeline")
 
 print()
 if failures:

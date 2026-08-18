@@ -66,10 +66,19 @@ _COMMON_PATTERNS = [
     ("fragment 'was never the hard part'",   _c(r"\bwas never the (?:hard part|main constraint|point)\b")),
     ("cliché 'table stakes'",                _c(r"\btable stakes\b")),
     ("aphorism 'pays the bills'",            _c(r"\bpays?\s+the\s+bills\b")),
+    ("fragment 'The new variable is X'",     _c(r"\bthe\s+new\s+variable\s+is\b")),
+    ("cliché 'the calculus has changed'",    _c(r"\bthe\s+calculus\s+has\s+(?:changed|shifted)\b")),
+    ("cliché 'raises the bar'",              _c(r"\brais(?:es?|ing)\s+the\s+bar\b")),
+    ("cliché 'did not sign up for'",         _c(r"\b(?:did|didn'?t)\s+(?:not\s+)?sign\s+up\s+for\b")),
+    ("abstract 'the floor has risen'",       _c(r"\b(?:floor|bar|baseline)\s+has\s+(?:risen|moved|shifted)\b")),
+    ("contrast 'bears little resemblance'",  _c(r"\bbears?\s+little\s+resemblance\b")),
+    ("puffery 'significant shift'",          _c(r"\b(?:represents?|marks?|signals?)\s+a\s+significant\b|\bsignificant\s+shift\b")),
+    ("setup 'one pattern stands out'",       _c(r"\b(?:one\s+)?pattern\s+stands\s+out\b|\bmirrors?\s+a\s+(?:pattern|broader)\b")),
+    ("closer 'the ones who / separate themselves'", _c(r"\bare\s+the\s+ones\s+who\b|\bwill\s+(?:be\s+the\s+ones|separate\s+themselves)\b")),
     # --- Rhetorical setups / meta-narration --------------------------------
     ("'the [adj] question is/becomes'",      _c(r"\bthe\s+(?:\w+\s+){0,2}question\b[^.!?]{0,90}\b(?:is|becomes|remains)\b")),
-    ("'the implication/takeaway is clear'",  _c(r"\bthe (?:implication|takeaway|lesson|message)s? (?:is|are|here is) clear\b")),
-    ("\"Here's the/what\"",                  _c(r"here'?s (?:the|what)\b")),
+    ("'the implication/takeaway is clear/direct'", _c(r"\bthe (?:\w+\s+)?(?:implication|takeaway|lesson|message)s? (?:is|are|here is) (?:clear|direct|obvious|simple|stark|straightforward)\b")),
+    ("\"Here's the/what/who\"",              _c(r"here'?s (?:the|what|who|why|where|how)\b")),
     ("setup 'the uncomfortable/hard truth'", _c(r"\bthe\s+(?:uncomfortable|hard|simple|inconvenient|blunt)\s+truth\b|\bthe\s+reality\s+is\b")),
     ("setup \"what's interesting is\"",      _c(r"\bwhat[']?s\s+(?:really\s+|particularly\s+)?"
                                                 r"(?:interesting|notable|striking|telling|surprising)\s+is\b"
@@ -86,7 +95,8 @@ _COMMON_PATTERNS = [
     ("'is a [adj] signal'",                  _c(r"\b(?:is|are|that[']?s|this\s+is|it[']?s)\s+(?:a|an)\s+(?:\w+\s+)?signal\b")),
     ("tic 'into the conversation'",          _c(r"\binto\s+the\s+conversation\b")),
     # --- Vague "we're seeing" observation openers --------------------------
-    ("filler 'fielding briefs/mandates'",    _c(r"\bfielding\s+(?:briefs?|mandates?|requests?)\b")),
+    ("filler 'we are fielding X'",           _c(r"\bwe\s+are\s+(?:already\s+)?fielding\b|\bfielding\s+(?:briefs?|mandates?|requests?|searches|enquiries|calls)\b")),
+    ("vague 'we keep seeing/hearing'",       _c(r"\bwe\s+keep\s+(?:seeing|hearing|noticing|finding)\b")),
     ("filler 'reflect(s) this shift'",       _c(r"\breflect(?:s|ing)?\s+this\s+shift\b")),
     ("vague 'we are seeing/observing'",      _c(r"\bwe(?:'re| are)\s+(?:already\s+|increasingly\s+|now\s+|also\s+|currently\s+|still\s+)?(?:seeing|observing|noticing|hearing|witnessing|learning|finding)\b")),
     ("vague 'we have seen/noticed'",         _c(r"\bwe(?:'ve| have)\s+(?:been\s+)?(?:seen|noticed|observed|tracked|tracking|been seeing|been tracking|started seeing)\b")),
@@ -123,7 +133,7 @@ _COMMON_PATTERNS = [
     # --- Reworded pivots / abstract-motion ---------------------------------
     ("'the X signal'",                       _c(r"\bthe\s+\w+\s+signal\b")),
     ("'the X is clear' sign-off",            _c(r"\bthe\s+\w+\s+is\s+clear\b")),
-    ("abstract-motion 'X is tilting/widening'", _c(r"\bthe\s+\w+\s+is\s+(?:tilting|shifting|narrowing|widening|closing|shrinking)\b")),
+    ("abstract-motion 'X is/are tilting/widening'", _c(r"\bthe\s+\w+\s+(?:is|are)\s+(?:tilting|shifting|narrowing|widening|closing|shrinking)\b|\b(?:is|are)\s+shifting\s+accordingly\b")),
     ("metaphor 'the window' (closing)",      _c(r"\bthe window\b[^.!?]*\b(?:narrow|clos|shrink)")),
     ("fragment 'X matters' pronouncement",   _c(r"\b(?:that|this|the timing|the distinction|the difference|the nuance|the gap|the context)\s+matters\b")),
     ("reworded 'neither X ... but'",         _c(r"\bneither\b[^.!?]*\bbut\b")),
@@ -141,13 +151,14 @@ _COMMON_PATTERNS = [
     ("dual 'for candidates ... for hiring'", _c(r"for candidates\b.{0,600}for hiring managers\b|for hiring managers\b.{0,600}for candidates\b", re.IGNORECASE | re.DOTALL)),
     ("opener 'In our X practice'",           _c(r"\bIn\s+our\s+[A-Z][A-Za-z&\s]{1,30}\s+practice\b", 0)),
     # --- Concessive pivot (concede-then-elevate) ----------------------------
-    ("concessive 'remain(s) foundational/essential'", _c(r"\bremains?\s+(?:foundational|essential|valuable|important|critical|central|relevant|the baseline)\b")),
+    ("concessive 'remain(s) foundational/useful'", _c(r"\bremains?\s+(?:foundational|essential|valuable|important|critical|central|relevant|useful|helpful|necessary|the baseline)\b")),
+    ("concessive 'the differentiator is'",   _c(r"\bthe\s+(?:differentiator|separator|dividing\s+line)\s+is\b")),
     ("concessive 'those/these remain/still'", _c(r"\b(?:those|these)\s+(?:remain\b|still\s+(?:matter|count|apply|hold))")),
     ("concessive 'still matters/counts'",    _c(r"\bstill\s+(?:matters?|counts?|applies|hold(?:s)? true)\b")),
     ("concessive 'what has changed is'",     _c(r"\bwhat(?:'s| has| have)?\s+changed\s+is\b")),
     ("concessive 'become the separator'",    _c(r"\bbecom(?:e|es|ing)\s+the\s+(?:separator|differentiator|dividing line)\b")),
     # --- Pointer-sentence ----------------------------------------------------
-    ("pointer-sentence 'That/This X signals'", _c(r"(?:^|[.!?]\s+)(?:that|this|such)\s+(?:\w+\s+){0,3}(?:also\s+)?(?:signals?|means\b|matters\b|appears?\b|creates?|changes?|translates?\s+into|reflects?|reshapes?|underscores?)\b")),
+    ("pointer-sentence 'That/This X signals'", _c(r"(?:^|[.!?]\s+)(?:that|this|such)\s+(?:\w+\s+){0,4}(?:also\s+)?(?:signals?|means\b|matters\b|appears?\b|creates?|changes?|translates?\s+into|reflects?|reshapes?|underscores?|mirrors?|(?:is|are)\s+significant)\b")),
     # --- Dismiss-then-elevate opener ----------------------------------------
     ("dismiss 'sounds like plumbing/boring'", _c(r"\bsounds?\s+like\b[^.!?]*\b(?:plumbing|housekeeping|boring|mundane|dull|a footnote)\b")),
     ("dismiss 'Another X, another Y'",       _c(r"\banother\b[^,.!?]{0,40},\s*another\b")),
@@ -249,6 +260,158 @@ def correction_preamble(hits: list) -> str:
         "gone. Do not introduce new banned patterns while fixing these. Keep "
         "all other sentences, the same facts, length and format."
     )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Semantic style judge (Opus)
+# ---------------------------------------------------------------------------
+# The regex layer above catches exact phrasings; it cannot catch the same
+# rhetoric reworded. On 2026-08-18 all four drafts passed every regex while
+# being full of paraphrased tells ("fielding searches", "Here's who benefits",
+# "the implication is direct", "remain useful, and the differentiator is") and
+# batch-level templating (a Munich client anecdote in the same slot in three
+# posts, every post closing on the same forward-looking prediction). The judge
+# reads each draft the way an editor does — for the MOVE, not the words — and
+# sees the sibling drafts so cross-post repetition is visible.
+
+JUDGE_MODEL = "claude-opus-4-5-20251101"
+
+_JUDGE_PROMPT = """You are the copy chief at Wolf Jansen, a specialist \
+recruitment company. You review draft posts before publication and reject \
+AI-sounding rhetoric. You judge the underlying rhetorical MOVE, not the exact \
+words — paraphrases of a banned move are equally banned.
+
+BANNED MOVES (any wording):
+1. Contrastive reversal: defining a thing by what it is not, in one sentence \
+or across two ("Rather than X, ... now Y", "not X, it's Y", "X. The real \
+story is Y", "has never been about X"). The affirmative point must stand alone.
+2. Concessive pivot: conceding the old thing then elevating the new ("X \
+remains useful, and/but the differentiator is Y", "X still matters. What has \
+changed is Y").
+3. Pointer sentence: opening a sentence with That/This/Such + abstract noun \
+just to announce the previous sentence mattered ("That compression is \
+significant enough to reshape...", "This mirrors a pattern...").
+4. Portentous fragment or pronouncement: short abstract declarations doing \
+significance work ("The new variable is AI.", "The technical floor has \
+risen.", "The calculus has changed.", "The stakes are highest downstream.").
+5. Meta-narration and setup frames: "Here's who/what/why...", "one pattern \
+stands out", "puts a number on something leaders have felt", "the implication \
+is direct", "raises the bar", "changes the shape of the talent problem".
+6. Vague self-referential observation: "we are fielding searches", "we keep \
+seeing", "the skill pairing we keep seeing", "this mirrors a pattern across \
+the market" — instead of one concrete named observation.
+7. Formulaic closer: ending on a forward-looking prediction ("We expect X to \
+become standard within 18 months", "will separate themselves over the coming \
+twelve months"), a "the ones who moved early" construction, or a rhetorical \
+question aimed at the reader.
+8. Implausible or over-engineered anecdote: first-person client stories are \
+allowed and welcome, but they must read like something a recruiter would \
+actually recount. Suspicious signs: cinematic detail ("rewrote its entire \
+consultant specification mid-search"), suspiciously exact figures ("salary \
+budget was 40% higher"), an interview "hinging on one question" with a \
+perfect three-part answer. Prefer rounded, modest, hedged specifics.
+9. Batch repetition (when sibling drafts are provided): reusing a sibling's \
+opener shape, closer shape, anecdote template (same city, same "a client \
+asked us" slot), or signature phrases/timelines ("over the coming twelve \
+months" in several drafts). Each draft must read like a different writer.
+10. Any remaining classic tells: em dashes, "not just", puffery \
+("significant shift", "underscores"), rule-of-three cadence, false ranges.
+
+Judge STRICTLY but do not invent problems: a plain concrete sentence is fine. \
+Report at most the 8 worst violations.
+
+Return ONLY a JSON object, no prose:
+{"violations": [{"quote": "exact offending text, max 20 words", "problem": \
+"which move and why, max 25 words"}]}
+Return {"violations": []} if the draft is genuinely clean."""
+
+
+def _extract_json(raw: str):
+    raw = raw.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    start, end = raw.find("{"), raw.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        import json as _json
+        return _json.loads(raw[start:end + 1])
+    except Exception:
+        return None
+
+
+def judge_draft(client, fields: dict, siblings: list = None,
+                context: str = "news") -> list:
+    """Ask Opus to judge a draft against the banned rhetorical moves.
+    `fields` maps field names to text (HTML is stripped). `siblings` is a list
+    of short plain-text summaries of the other drafts in this batch, used for
+    repetition checks. Returns hits in the same shape as detect(); a judge
+    failure returns [] so the pipeline never blocks on the judge."""
+    parts = []
+    for name, value in (fields or {}).items():
+        if isinstance(value, str) and value.strip():
+            parts.append(f"[{name}]\n{_plain(value).strip()}")
+    if not parts:
+        return []
+    draft_block = "\n\n".join(parts)
+
+    sibling_block = ""
+    if siblings:
+        joined = "\n\n---\n\n".join(s.strip()[:900] for s in siblings if s and s.strip())
+        if joined:
+            sibling_block = (
+                "\n\nSIBLING DRAFTS IN THIS BATCH (check the draft under "
+                "review for repeated openers, closers, anecdote templates, "
+                "cities, and signature phrases against these):\n\n" + joined)
+
+    kind = "LinkedIn company-page post" if context == "linkedin" else "news commentary post"
+    user_msg = (f"DRAFT {kind.upper()} UNDER REVIEW:\n\n{draft_block}"
+                f"{sibling_block}\n\nReturn the JSON verdict now.")
+
+    try:
+        resp = client.messages.create(
+            model=JUDGE_MODEL,
+            max_tokens=800,
+            system=_JUDGE_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        obj = _extract_json(resp.content[0].text or "")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Style judge call failed: {e}")
+        return []
+    if not obj or not isinstance(obj.get("violations"), list):
+        return []
+
+    hits = []
+    for v in obj["violations"][:8]:
+        if isinstance(v, dict) and v.get("quote"):
+            hits.append({
+                "label": f"judge: {str(v.get('problem', 'banned move'))[:120]}",
+                "fragment": str(v["quote"])[:120],
+            })
+    return hits
+
+
+def sibling_summary(draft: dict) -> str:
+    """Short plain-text fingerprint of a draft for the judge's batch check:
+    title, first sentence, last sentence, and any first-person anecdote lines."""
+    title = _plain(draft.get("title", ""))
+    body = _plain(draft.get("body", ""))
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+    lines = [f"Title: {title}"]
+    if sentences:
+        lines.append(f"Opens: {sentences[0]}")
+        lines.append(f"Closes: {sentences[-1]}")
+    anecdotes = [s for s in sentences
+                 if re.search(r"\b(?:we placed|a client|we took|asked us|our (?:search|mandate|placement)|a recent mandate)\b",
+                              s, re.IGNORECASE)]
+    for a in anecdotes[:2]:
+        lines.append(f"Anecdote: {a}")
     return "\n".join(lines)
 
 

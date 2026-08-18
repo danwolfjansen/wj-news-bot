@@ -421,6 +421,37 @@ post read like the same template. Each move below is now restricted:
 When our own evidence appears it must be specific AND fresh from post to post. If
 you cannot make it specific and fresh, leave it out and make the market point.
 
+### Anecdote realism and variety (client stories)
+First-person client anecdotes are welcome, but they must read like something a
+recruiter would actually say across a desk, and they must not repeat across the
+batch. Rules:
+- PLAUSIBLE, NOT CINEMATIC. No "rewrote its entire specification mid-search",
+  no interview that "hinged on one question" answered in three perfect parts,
+  no suspiciously exact figures ("the salary budget was 40% higher"). Use
+  rounded, hedged specifics ("noticeably above last year's range", "roughly a
+  third longer than planned") or none at all.
+- AT MOST TWO posts in a batch may contain a client anecdote. The others make
+  the market point with no self-reference, as in Example B.
+- VARY THE CITY AND THE SHAPE. If a sibling post already uses a Munich or
+  Frankfurt client, use a different city or no city. If a sibling's anecdote
+  sits in paragraph three doing evidence duty, put yours elsewhere or open
+  with it. Never two anecdotes with the same shape ("A client asked us for X")
+  in one batch.
+
+### Closers must differ across the batch
+At most ONE post in a batch may end on a forward-looking prediction ("we
+expect X within 18 months", "over the coming twelve months"). The rest end on
+a concrete recommendation, a sharp observation, or a specific example. Never
+end on a rhetorical question aimed at the reader.
+
+### Paraphrasing a banned move is still the banned move
+An automated editor reviews every draft for the rhetorical MOVES above in ANY
+wording. Swapping a banned word for a synonym ("fielding searches" for
+"fielding briefs", "Here's who" for "Here's what", "the implication is direct"
+for "is clear", "remain useful, and the differentiator is" for "remain
+valuable but the separator is") does not pass review; the move itself is what
+gets rejected. Write the plain affirmative sentence instead.
+
 ## Post structure rules
 Every post must have a DIFFERENT internal structure. Do not use the same sequence of
 sections across posts in the same batch. Some structures that work:
@@ -1061,20 +1092,31 @@ Please rewrite this as an original Wolf Jansen commentary post. Remember to end
 the body with a link back to the original source at {story['link']}.
 {_variety_brief(prior_drafts)}"""
     messages = [{"role": "user", "content": user_message}]
+    siblings = [style_guard.sibling_summary(d) for d in (prior_drafts or [])]
+
+    def _check(draft: dict) -> list:
+        """Two layers: fast regex pass, then the Opus judge, which reads the
+        draft (and its batch siblings) for the same rhetorical MOVES in any
+        wording — the regex layer alone taught the model to paraphrase around
+        exact patterns (all four 2026-08-18 drafts passed regex clean)."""
+        tells = _detect_ai_tells(draft)
+        judge_hits = style_guard.judge_draft(
+            client,
+            {f: draft.get(f, "") for f in ("title", "excerpt", "body")},
+            siblings=siblings, context="news")
+        return tells + style_guard.format_hits(judge_hits)
+
     try:
         result = _generate_parse_clean(client, messages)
         if result is None:
             return None
-        # Programmatic safety net: the system prompt is not always obeyed, so we
-        # scan the parsed draft for AI writing tells. If any fire, send ONE
-        # corrective re-prompt quoting the offences and keep the cleaner draft.
-        tells = _detect_ai_tells(result)
+        tells = _check(result)
         attempts = 0
         while tells and attempts < 2:
             attempts += 1
             log.warning(
-                f"  AI-tell patterns in draft of '{story['title']}' "
-                f"(attempt {attempts}): {tells} — requesting corrective rewrite"
+                f"  Style violations in draft of '{story['title']}' "
+                f"(attempt {attempts}): {tells[:6]} — requesting corrective rewrite"
             )
             try:
                 messages.append({"role": "assistant", "content": json.dumps(result)})
@@ -1085,7 +1127,7 @@ the body with a link back to the original source at {story['link']}.
                 break
             if retry is None:
                 break
-            retry_tells = _detect_ai_tells(retry)
+            retry_tells = _check(retry)
             if len(retry_tells) < len(tells):
                 result, tells = retry, retry_tells   # accept the cleaner draft
             else:
@@ -1098,10 +1140,12 @@ the body with a link back to the original source at {story['link']}.
         # Anything that survived the retries is surfaced on the approval email
         # card so it can be reviewed by a human before publishing — a dirty
         # draft must never reach the inbox looking identical to a clean one.
+        # (Regex re-runs cheaply post-headline-fix; judge findings carry over.)
         if isinstance(result, dict):
-            result["style_warnings"] = _detect_ai_tells(result)
+            judge_left = [t for t in tells if t.startswith("judge:")]
+            result["style_warnings"] = _detect_ai_tells(result) + judge_left
             if result["style_warnings"]:
-                log.warning(f"  UNRESOLVED tells going to review: "
+                log.warning(f"  UNRESOLVED violations going to review: "
                             f"{result['style_warnings'][:6]}")
         return result
     except Exception as e:

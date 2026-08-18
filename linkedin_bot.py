@@ -635,12 +635,19 @@ every rule in the system prompt. Return JSON only.
     # Belt-and-braces #1: scrub em/en dashes and firm→company even if Opus slipped.
     result["post_text"] = _swap_firm_for_company(_scrub_dashes(result["post_text"]))
 
-    # Belt-and-braces #2: scan for banned patterns with the shared style guard
-    # (the same unified detector the news bot uses). Up to TWO feedback-driven
-    # retries quoting the offending fragments; keep the cleanest draft seen.
-    # Whatever survives is attached as style_warnings and shown on the approval
-    # email card — a dirty draft must never look identical to a clean one.
-    hits = _detect_banned_patterns(result["post_text"])
+    # Belt-and-braces #2: scan with the shared style guard — fast regex pass
+    # plus the Opus judge, which catches the same rhetorical moves reworded
+    # (the regex layer alone taught the model to paraphrase around patterns).
+    # Up to TWO feedback-driven retries quoting the offending fragments; keep
+    # the cleanest draft seen. Whatever survives is attached as style_warnings
+    # and shown on the approval email card.
+    def _check(text: str) -> list:
+        hits = _detect_banned_patterns(text)
+        judge_hits = style_guard.judge_draft(
+            client, {"post_text": text}, context="linkedin")
+        return hits + style_guard.format_hits(judge_hits)
+
+    hits = _check(result["post_text"])
     attempts = 0
     while hits and attempts < 2:
         attempts += 1
@@ -724,7 +731,7 @@ Return JSON only.
             log.warning("Retry call failed — keeping previous draft.")
             break
         retry["post_text"] = _swap_firm_for_company(_scrub_dashes(retry["post_text"]))
-        retry_hits = _detect_banned_patterns(retry["post_text"])
+        retry_hits = _check(retry["post_text"])
         if len(retry_hits) < len(hits):
             result, hits = retry, retry_hits   # accept the cleaner draft
         else:
