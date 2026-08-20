@@ -47,18 +47,23 @@
 </head>
 <body>
   <div class="card">
-    <div class="icon" id="icon">🗑️</div>
-    <h1 id="title">Discard this draft?</h1>
-    <p  id="msg">The draft will be rejected and will not be published.</p>
-    <button id="go" class="hidden">✗ Yes, discard it</button>
+    <div class="icon" id="icon">⏳</div>
+    <h1 id="title">Rejecting post…</h1>
+    <p  id="msg">Please wait a moment.</p>
+    <button id="go" class="hidden">Try again</button>
     <p class="small hidden" id="note"></p>
   </div>
 
   <script>
-    // This page deliberately does NOTHING on load. The Power Automate webhook
-    // only fires on an explicit tap of the button below. Auto-firing on load
-    // let email-client link prefetchers, refreshes and re-taps trigger the
-    // flow repeatedly — which published duplicate posts (2026-08-17).
+    // ONE-CLICK APPROVAL: the webhook fires automatically when this page
+    // opens from the email link. Duplicate protection comes from two layers:
+    // (1) the news bot pre-creates the WordPress draft, so approval is an
+    //     idempotent publish of an existing post_id (repeat fires re-publish
+    //     the same post, they cannot create a second one);
+    // (2) localStorage remembers a used link per device, so a reload or
+    //     re-tap shows 'Already actioned' instead of firing again.
+    // The button below only appears as a retry fallback after an error, or
+    // as the manual 'run it again' path on an already-used link.
     const params  = new URLSearchParams(window.location.search);
     const encoded = params.get('url');
     const token   = params.get('token');
@@ -73,7 +78,8 @@
 
     function fire() {
       btn.disabled = true;
-      btn.textContent = 'Working…';
+      btn.classList.add('hidden');
+      note.classList.add('hidden');
       show('⏳', 'Rejecting post…', 'Please wait a moment.');
       const postId = params.get('post_id') || '';
       let paUrl = atob(encoded) + '&token=' + encodeURIComponent(token);
@@ -81,13 +87,12 @@
       fetch(paUrl, { method: 'GET', mode: 'no-cors' })
         .then(() => {
           try { localStorage.setItem('wj-done-' + token, '1'); } catch (e) {}
-          btn.classList.add('hidden');
           show('✅', 'Post rejected', 'The draft has been discarded.');
         })
         .catch(() => {
           btn.disabled = false;
-          btn.textContent = '✗ Yes, discard it';
-          show('❌', 'Something went wrong', 'Please tap the button to try again.');
+          btn.textContent = 'Try again';
+          show('❌', 'Something went wrong', 'Tap the button to try again.');
           btn.classList.remove('hidden');
         });
     }
@@ -103,12 +108,11 @@
         note.classList.remove('hidden');
         document.getElementById('again').addEventListener('click', function (e) {
           e.preventDefault();
-          note.classList.add('hidden');
           fire();
         });
       } else {
-        btn.classList.remove('hidden');
         btn.addEventListener('click', fire);
+        fire();
       }
     }
   </script>

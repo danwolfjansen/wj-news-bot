@@ -740,6 +740,45 @@ Return JSON only.
             log.warning(f"Retry no cleaner ({len(retry_hits)} vs {len(hits)}), "
                         f"keeping previous draft.")
 
+    # SURGICAL REPAIR: full rewrites regenerate the whole post and often trade
+    # one problem for another. When flags remain, run up to two targeted edits
+    # that touch ONLY the offending sentences, so residual violations get
+    # fixed by the bot instead of being handed to a human as warnings.
+    for repair_round in range(2):
+        if not hits:
+            break
+        log.info(f"Surgical repair round {repair_round + 1}: "
+                 f"{len(hits)} violation(s) to fix")
+        bullets = "\n".join(f"  - {h}" for h in hits[:10])
+        repair_msg = (
+            "Below is a Wolf Jansen LinkedIn draft as JSON, followed by "
+            "specific style violations found by our automated checker. "
+            "Repair the post.\n\n"
+            "REPAIR RULES:\n"
+            "- Rewrite ONLY the sentences containing the quoted fragments. "
+            "Every other sentence must be preserved VERBATIM.\n"
+            "- The right fix is usually deleting the offending sentence or "
+            "restating its point as one plain affirmative sentence. Never "
+            "paraphrase the same rhetorical move in new words.\n"
+            "- Do not introduce any new banned pattern, em dash, emoji, or "
+            "the word 'firm'.\n"
+            "- Return the COMPLETE corrected post as a JSON object in exactly "
+            "the same format, nothing else.\n\n"
+            f"DRAFT JSON:\n{json.dumps(result, ensure_ascii=False)}\n\n"
+            f"VIOLATIONS TO FIX:\n{bullets}"
+        )
+        repaired = _opus_linkedin_call(client, repair_msg)
+        if not repaired or not repaired.get("post_text"):
+            break
+        repaired["post_text"] = _swap_firm_for_company(
+            _scrub_dashes(repaired["post_text"]))
+        repaired_hits = _check(repaired["post_text"])
+        if len(repaired_hits) < len(hits):
+            result, hits = repaired, repaired_hits
+        else:
+            log.warning("Repair no cleaner, keeping previous draft.")
+            break
+
     result["style_warnings"] = hits
     if hits:
         log.warning(f"UNRESOLVED tells going to review: {hits[:6]}")

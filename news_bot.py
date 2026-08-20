@@ -1134,6 +1134,32 @@ the body with a link back to the original source at {story['link']}.
                 # Keep the previous (cleaner or equal) draft but spend the
                 # remaining attempt rather than giving up straight away.
                 log.warning("  Corrective rewrite no cleaner, keeping previous draft")
+        # SURGICAL REPAIR: full rewrites regenerate everything and often swap
+        # one problem for another, so residual violations used to reach the
+        # email as warnings for a human to fix. Instead, run up to two
+        # targeted edits that touch ONLY the flagged sentences. This is what
+        # actually clears the last one or two flags on an otherwise-good draft.
+        for repair_round in range(2):
+            if not tells:
+                break
+            log.info(f"  Surgical repair round {repair_round + 1}: "
+                     f"{len(tells)} violation(s) to fix")
+            try:
+                repaired = _generate_parse_clean(
+                    client,
+                    [{"role": "user",
+                      "content": _build_repair_message(result, tells)}])
+            except Exception as e:
+                log.warning(f"  Surgical repair failed ({e}); keeping draft")
+                break
+            if not repaired:
+                break
+            repaired_tells = _check(repaired)
+            if len(repaired_tells) < len(tells):
+                result, tells = repaired, repaired_tells
+            else:
+                log.warning("  Repair no cleaner, keeping previous draft")
+                break
         # Hard-reject banned headline patterns and regenerate title only.
         if isinstance(result, dict) and result.get("title"):
             result["title"] = _enforce_headline(result["title"], story, client)
@@ -1220,6 +1246,33 @@ def _detect_ai_tells(result: dict) -> list:
         return []
     hits = style_guard.detect_fields(result, context="news")
     return style_guard.format_hits(hits)
+
+
+def _build_repair_message(result: dict, tells: list) -> str:
+    """Surgical repair prompt: fix ONLY the flagged sentences, keep the rest
+    verbatim. Used after the full-rewrite retries, which regenerate the whole
+    draft and often trade one set of problems for another; when only a couple
+    of violations remain, a targeted edit converges where a rewrite gambles."""
+    bullets = "\n".join(f"  - {t}" for t in tells[:10])
+    return (
+        "Below is a Wolf Jansen draft post as JSON, followed by specific "
+        "style violations found by our automated checker. Repair the draft.\n\n"
+        "REPAIR RULES:\n"
+        "- Rewrite ONLY the sentences containing the quoted fragments. Every "
+        "other sentence must be preserved VERBATIM, character for character.\n"
+        "- The right fix is usually deleting the offending sentence or "
+        "restating its point as one plain affirmative sentence. Never "
+        "paraphrase the same rhetorical move in new words.\n"
+        "- If a violation says an anecdote repeats a sibling post (same city, "
+        "same template), change the city and reshape the sentence, or fold "
+        "the point into plain market commentary with no anecdote.\n"
+        "- Do not introduce any new banned pattern, em dash, or the word "
+        "'firm'.\n"
+        "- Return the COMPLETE corrected post as a JSON object in exactly the "
+        "same format, nothing else.\n\n"
+        f"DRAFT JSON:\n{json.dumps(result, ensure_ascii=False)}\n\n"
+        f"VIOLATIONS TO FIX:\n{bullets}"
+    )
 
 
 def _build_correction_message(tells: list) -> str:

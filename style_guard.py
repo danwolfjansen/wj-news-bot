@@ -164,7 +164,7 @@ _COMMON_PATTERNS = [
     ("dismiss 'Another X, another Y'",       _c(r"\banother\b[^,.!?]{0,40},\s*another\b")),
     # --- House style ---------------------------------------------------------
     ("'firm'/'firms'",                       _c(r"\bfirms?\b")),
-    ("specific year reference",              _c(r"\b(?:in|by|through|during|until|into)\s+20(?:2[0-9]|3\d)\b")),
+    ("specific year reference",              _c(r"\b(?:in|by|through|during|until|into)\s+20(?:2[0-9]|3\d)\b|\bQ[1-4]\s+20(?:2[0-9]|3\d)\b|\b20(?:2[0-9]|3\d)[-–]20(?:2[0-9]|3\d)\b")),
     ("em dash leak",                         _c(r"—")),
 ]
 

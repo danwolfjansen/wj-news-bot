@@ -154,9 +154,10 @@ expect('"' in corr and "uncomfortable truth" in corr.lower(),
        "news: correction QUOTES the offending fragment")
 expect(r.get("style_warnings") == [], "news: clean final draft, no warnings")
 
-c2 = FakeClient([BAD, BAD, BAD])
+c2 = FakeClient([BAD, BAD, BAD, BAD])
 r2 = news_bot.rewrite_story(story, c2)
-expect(len(c2.calls) == 3, "news: stubborn draft exhausts both retries")
+expect(len(c2.calls) == 4,
+       "news: stubborn draft exhausts retries + one surgical repair attempt")
 expect(len(r2.get("style_warnings", [])) > 0,
        "news: unresolved tells attached as style_warnings")
 
@@ -188,10 +189,10 @@ expect(lr is not None and lr.get("style_warnings") == [],
        "linkedin: converges to clean draft")
 expect(len(lc.calls) == 2, "linkedin: 1 corrective retry made")
 
-lc2 = FakeClient([BAD_LI, BAD_LI, BAD_LI])
+lc2 = FakeClient([BAD_LI, BAD_LI, BAD_LI, BAD_LI])
 lr2 = linkedin_bot.rewrite_for_linkedin(entry, None, lc2)
-expect(len(lc2.calls) == 3,
-       "linkedin: now retries twice (was once, accepting dirty output)")
+expect(len(lc2.calls) == 4,
+       "linkedin: two retries + one surgical repair attempt")
 expect(len(lr2.get("style_warnings", [])) > 0,
        "linkedin: unresolved tells attached as style_warnings")
 expect("firm" not in lr2["post_text"].split("#")[0]
