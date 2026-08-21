@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install feedparser anthropic requests python-dotenv
+        run: pip install feedparser anthropic==0.125.0 requests python-dotenv
 
       - name: Run news bot
         env:

@@ -944,6 +944,13 @@ DIVISION_RELEVANCE_CONTEXT = {
     ),
 }
 
+# Errors collected during a run so main() can tell the difference between
+# "no new stories" and "everything failed" — on 2026-08-21 every API call
+# failed instantly, the run finished green in 11 seconds, and nobody was
+# told. Silent failure is not an acceptable failure mode for this bot.
+_RUN_ERRORS: list = []
+
+
 def is_story_relevant(story: dict, division_key: str, client: anthropic.Anthropic) -> bool:
     """Quick yes/no relevance check before spending credits on a full rewrite."""
     context = DIVISION_RELEVANCE_CONTEXT[division_key]
@@ -966,6 +973,7 @@ def is_story_relevant(story: dict, division_key: str, client: anthropic.Anthropi
         return answer.startswith("yes")
     except Exception as e:
         log.warning(f"  Relevance check failed ({e}) — including story by default")
+        _RUN_ERRORS.append(f"relevance check: {e}")
         return True
 
 
@@ -1176,6 +1184,7 @@ the body with a link back to the original source at {story['link']}.
         return result
     except Exception as e:
         log.error(f"  Rewrite failed for '{story['title']}': {e}")
+        _RUN_ERRORS.append(f"rewrite of '{story['title'][:60]}': {e}")
         return None
 
 
@@ -1529,6 +1538,37 @@ def send_approval_email(new_drafts: list[dict]):
 _LOCK_PATH = os.path.join(os.path.expanduser("~/.newsbot"), "newsbot.lock")
 
 
+def send_failure_alert_email(subject_line: str, detail: str):
+    """Plain alert email so a broken run is never silent. Uses the same SMTP
+    config as the digest; failures here only log (never crash the run)."""
+    smtp_user = CONFIG["smtp_user"]
+    smtp_pass = CONFIG["smtp_password"]
+    if not (smtp_user and smtp_pass):
+        log.warning("SMTP not configured — cannot send failure alert.")
+        return
+    recipients = [r.strip() for r in CONFIG["email_to"].split(",") if r.strip()]
+    date_str = datetime.now(timezone.utc).strftime("%d %B %Y %H:%M UTC")
+    body = (
+        f"Wolf Jansen News Bot ALERT — {date_str}\n\n"
+        f"{subject_line}\n\n"
+        f"{detail}\n\n"
+        f"Check the run log: https://github.com/danwolfjansen/wj-news-bot/actions\n"
+    )
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"⚠ News Bot ALERT: {subject_line}"
+    msg["From"]    = CONFIG["email_from"]
+    msg["To"]      = ", ".join(recipients)
+    msg.attach(MIMEText(body, "plain"))
+    try:
+        with smtplib.SMTP(CONFIG["smtp_host"], CONFIG["smtp_port"]) as server:
+            server.ehlo(); server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, recipients, msg.as_string())
+        log.info("⚠ Failure alert email sent.")
+    except Exception as e:
+        log.error(f"Failed to send alert email: {e}")
+
+
 def _acquire_lock():
     """Open and exclusively lock ~/.newsbot/newsbot.lock.
 
@@ -1588,11 +1628,16 @@ def main():
                     seen.add(story["id"])
                     continue
                 rewritten = rewrite_story(story, ai_client, prior_drafts=new_drafts)
-                seen.add(story["id"])
 
                 if not rewritten:
-                    log.warning("  Skipping — rewrite failed")
+                    # Do NOT mark the story as seen: a failed rewrite (API
+                    # error, parse error) should be retried on the next run,
+                    # not silently burned. On 2026-08-21 nine stories were
+                    # consumed this way by a run where every API call failed.
+                    log.warning("  Skipping — rewrite failed (story left "
+                                "unseen for retry next run)")
                     continue
+                seen.add(story["id"])
 
                 token = str(uuid.uuid4())
                 post_id = register_draft(
@@ -1628,7 +1673,18 @@ def main():
         else:
             log.info("No new stories found — nothing to send.")
 
+        # Never fail silently: "no email" must only ever mean "no news".
+        if _RUN_ERRORS and (not new_drafts or len(_RUN_ERRORS) >= 3):
+            send_failure_alert_email(
+                f"{len(_RUN_ERRORS)} error(s), {len(new_drafts)} draft(s) produced",
+                "Errors during this run (failed stories will be retried "
+                "next run):\n\n" + "\n".join(f"- {e}" for e in _RUN_ERRORS[:10]))
+
         log.info("=" * 60)
+    except Exception as e:
+        log.error(f"FATAL: run crashed: {e}")
+        send_failure_alert_email("run crashed with an unhandled error", str(e))
+        raise
     finally:
         _release_lock(lock_fd)
 
