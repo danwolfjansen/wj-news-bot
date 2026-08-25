@@ -203,7 +203,10 @@ lcard = linkedin_bot._linkedin_card_html("tok", "text", entry, None, None,
                                          lr2["style_warnings"])
 expect("Style guard" in lcard, "linkedin: warning strip renders on email card")
 
-print("\n== 7. Semantic judge layer ==")
+print("\n== 7. Semantic judge layer + repair convergence ==")
+# JF quotes a fragment that appears in BAD's excerpt, so a repair that removes
+# it is detectably successful; JF2 quotes text not present anywhere (a fresh
+# subjective opinion on the re-read).
 JF = json.dumps({"violations": [{"quote": "puts a number on something leaders have felt",
                                  "problem": "meta setup frame"}]})
 JP = json.dumps({"violations": []})
@@ -213,14 +216,60 @@ expect(len(jc.calls) == 2 and jc.judge_calls == 2,
        "regex-clean draft rewritten on judge verdict alone")
 expect(jr.get("style_warnings") == [], "judge-clean second draft carries no warnings")
 
-jc2 = FakeClient([GOOD, GOOD, GOOD], judge_replies=[JF, JF, JF])
+# Reproducibly-dirty: judge returns the same finding on every pass, including
+# the final stability pass -> it must surface. (1 initial + 2 rewrites +
+# 3 adopted repairs = 6 gen calls; 6 checks + 1 stability = 7 judge calls.)
+jc2 = FakeClient([GOOD] * 6, judge_replies=[JF] * 7)
 jr2 = news_bot.rewrite_story(story, jc2)
 expect(any(w.startswith("judge:") for w in jr2.get("style_warnings", [])),
-       "stubborn judge finding surfaces in style_warnings")
+       "reproducible judge finding still surfaces in style_warnings")
+
+# One-off opinion: same flow but the stability pass disagrees -> suppressed.
+jc3 = FakeClient([GOOD] * 6, judge_replies=[JF] * 6 + [JP])
+jr3 = news_bot.rewrite_story(story, jc3)
+expect(jr3.get("style_warnings") == [],
+       "non-reproducible judge finding suppressed by stability filter")
+
+# Repair acceptance is fragment-based: a repair that removes the quoted
+# fragment is adopted even when the judge finds NEW findings on the re-read.
+GOOD_D = json.loads(GOOD)
+BAD_FRAG = dict(GOOD_D)
+BAD_FRAG["excerpt"] = "This puts a number on something leaders have felt for years."
+JF2 = json.dumps({"violations": [{"quote": "Contractor rates dropped 5 percent",
+                                  "problem": "fresh subjective nitpick"}]})
+# initial JF -> rewrites return BAD_FRAG again (JF, JF: no improvement) ->
+# repair returns GOOD (fragment gone) -> adopted -> post-repair check JF2
+# (new, different) -> round 2 repair returns GOOD again (JF2 fragment still
+# present -> NOT adopted, break) -> stability pass JP -> warnings empty.
+jc4 = FakeClient([json.dumps(BAD_FRAG)] * 2 + [GOOD] * 3,
+                 judge_replies=[JF, JF, JF, JF2, JP])
+jr4 = news_bot.rewrite_story(story, jc4)
+expect(jr4["excerpt"] == GOOD_D["excerpt"],
+       "repair adopted on fragment removal despite new judge findings")
+expect(jr4.get("style_warnings") == [],
+       "new one-off finding then suppressed by stability filter")
 
 expect(sg.judge_draft(FakeClient([], judge_replies=["not json at all"]),
                       {"body": "x"}) == [],
        "unparseable judge output never blocks the pipeline")
+
+print("\n== 8. Convergence helper units ==")
+expect(sg.extract_fragment('judge: meta frame: "the tell here"') == "the tell here",
+       "extract_fragment pulls the quoted text")
+expect(not sg.fragments_gone(['x: "Contractor rates dropped 5 percent"'],
+                             "<p>Contractor rates dropped 5 percent in Q1</p>"),
+       "fragments_gone false while fragment present")
+expect(sg.fragments_gone(['x: "Contractor rates dropped 5 percent"'],
+                         "<p>Rates for contractors moved down.</p>"),
+       "fragments_gone true after rewrite")
+stable = sg.reproducible_judge_tells(
+    ['judge: p: "the hiring signal is clear to everyone watching"'],
+    [{"fragment": "the hiring signal is clear"}])
+expect(len(stable) == 1, "overlapping second-pass finding counts as stable")
+expect(sg.reproducible_judge_tells(
+    ['judge: p: "the hiring signal is clear to everyone watching"'],
+    [{"fragment": "a completely different sentence about margins"}]) == [],
+       "non-overlapping second-pass finding is dropped")
 
 print()
 if failures:

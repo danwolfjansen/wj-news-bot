@@ -1142,12 +1142,13 @@ the body with a link back to the original source at {story['link']}.
                 # Keep the previous (cleaner or equal) draft but spend the
                 # remaining attempt rather than giving up straight away.
                 log.warning("  Corrective rewrite no cleaner, keeping previous draft")
-        # SURGICAL REPAIR: full rewrites regenerate everything and often swap
-        # one problem for another, so residual violations used to reach the
-        # email as warnings for a human to fix. Instead, run up to two
-        # targeted edits that touch ONLY the flagged sentences. This is what
-        # actually clears the last one or two flags on an otherwise-good draft.
-        for repair_round in range(2):
+        # SURGICAL REPAIR with DETERMINISTIC acceptance. A repair is adopted
+        # when the SPECIFIC quoted fragments are gone from the text and the
+        # regex layer got no worse — NOT when the total count (including the
+        # judge's fresh, subjective findings on the re-read) happens to drop.
+        # Judging repairs by total count made the loop reject its own good
+        # repairs and ship the original flags to the reviewer (2026-08-25).
+        for repair_round in range(3):
             if not tells:
                 break
             log.info(f"  Surgical repair round {repair_round + 1}: "
@@ -1162,12 +1163,33 @@ the body with a link back to the original source at {story['link']}.
                 break
             if not repaired:
                 break
-            repaired_tells = _check(repaired)
-            if len(repaired_tells) < len(tells):
-                result, tells = repaired, repaired_tells
+            repaired_text = " ".join(str(repaired.get(f, ""))
+                                     for f in ("title", "excerpt", "body"))
+            if (style_guard.fragments_gone(tells, repaired_text)
+                    and len(_detect_ai_tells(repaired)) <= len(_detect_ai_tells(result))):
+                result = repaired
+                tells = _check(result)   # fresh full check targets next round
+                log.info(f"  Repair adopted; {len(tells)} finding(s) remain")
             else:
-                log.warning("  Repair no cleaner, keeping previous draft")
+                log.warning("  Repair left targeted fragments in place, "
+                            "keeping previous draft")
                 break
+        # STABILITY FILTER: regex findings always surface, but a judge finding
+        # only reaches the email if a second independent judge pass flags
+        # overlapping text. The judge reads slightly differently every time;
+        # a one-off borderline opinion must not become an amber warning.
+        judge_tells = [t for t in tells if t.startswith("judge:")]
+        if judge_tells:
+            second = style_guard.judge_draft(
+                client,
+                {f: result.get(f, "") for f in ("title", "excerpt", "body")},
+                siblings=siblings, context="news")
+            stable = style_guard.reproducible_judge_tells(judge_tells, second)
+            dropped = len(judge_tells) - len(stable)
+            if dropped:
+                log.info(f"  Stability filter dropped {dropped} "
+                         f"non-reproducible judge finding(s)")
+            tells = [t for t in tells if not t.startswith("judge:")] + stable
         # Hard-reject banned headline patterns and regenerate title only.
         if isinstance(result, dict) and result.get("title"):
             result["title"] = _enforce_headline(result["title"], story, client)

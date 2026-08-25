@@ -744,7 +744,7 @@ Return JSON only.
     # one problem for another. When flags remain, run up to two targeted edits
     # that touch ONLY the offending sentences, so residual violations get
     # fixed by the bot instead of being handed to a human as warnings.
-    for repair_round in range(2):
+    for repair_round in range(3):
         if not hits:
             break
         log.info(f"Surgical repair round {repair_round + 1}: "
@@ -772,12 +772,29 @@ Return JSON only.
             break
         repaired["post_text"] = _swap_firm_for_company(
             _scrub_dashes(repaired["post_text"]))
-        repaired_hits = _check(repaired["post_text"])
-        if len(repaired_hits) < len(hits):
-            result, hits = repaired, repaired_hits
+        # DETERMINISTIC acceptance: adopt the repair when the specific quoted
+        # fragments are gone and the regex layer got no worse. Judging by
+        # total count let the judge's fresh subjective findings on the
+        # re-read veto good repairs (2026-08-25).
+        if (style_guard.fragments_gone(hits, repaired["post_text"])
+                and len(_detect_banned_patterns(repaired["post_text"]))
+                    <= len(_detect_banned_patterns(result["post_text"]))):
+            result = repaired
+            hits = _check(result["post_text"])
+            log.info(f"Repair adopted; {len(hits)} finding(s) remain")
         else:
-            log.warning("Repair no cleaner, keeping previous draft.")
+            log.warning("Repair left targeted fragments in place, "
+                        "keeping previous draft.")
             break
+
+    # STABILITY FILTER: a judge finding only surfaces as a warning if a second
+    # independent judge pass flags overlapping text; regex findings always do.
+    judge_hits_left = [h for h in hits if h.startswith("judge:")]
+    if judge_hits_left:
+        second = style_guard.judge_draft(client, {"post_text": result["post_text"]},
+                                         context="linkedin")
+        stable = style_guard.reproducible_judge_tells(judge_hits_left, second)
+        hits = [h for h in hits if not h.startswith("judge:")] + stable
 
     result["style_warnings"] = hits
     if hits:

@@ -306,11 +306,12 @@ become standard within 18 months", "will separate themselves over the coming \
 twelve months"), a "the ones who moved early" construction, or a rhetorical \
 question aimed at the reader.
 8. Implausible or over-engineered anecdote: first-person client stories are \
-allowed and welcome, but they must read like something a recruiter would \
-actually recount. Suspicious signs: cinematic detail ("rewrote its entire \
-consultant specification mid-search"), suspiciously exact figures ("salary \
-budget was 40% higher"), an interview "hinging on one question" with a \
-perfect three-part answer. Prefer rounded, modest, hedged specifics.
+allowed and WELCOME — flag one only when it is cinematic or too perfect to \
+believe: a spec "rewritten mid-search", an interview "hinging on one \
+question" with a flawless three-part answer, implausibly exact unverifiable \
+figures ("the salary budget was 40% higher"). Ordinary counts, rounded or \
+hedged figures, and plain "a client asked us for X" stories are FINE — do \
+not flag them.
 9. Batch repetition (when sibling drafts are provided): reusing a sibling's \
 opener shape, closer shape, anecdote template (same city, same "a client \
 asked us" slot), or signature phrases/timelines ("over the coming twelve \
@@ -318,13 +319,23 @@ months" in several drafts). Each draft must read like a different writer.
 10. Any remaining classic tells: em dashes, "not just", puffery \
 ("significant shift", "underscores"), rule-of-three cadence, false ranges.
 
-Judge STRICTLY but do not invent problems: a plain concrete sentence is fine. \
-Report at most the 8 worst violations.
+CALIBRATION — this decides whether the pipeline converges, so obey it:
+- Flag ONLY clear, unambiguous instances of the moves above. The bar: if the \
+sentence would pass unremarked in a well-edited Financial Times column, do \
+NOT flag it.
+- Severity over coverage: report at most the 5 worst violations, and only \
+findings you are confident about. An empty verdict on competent plain prose \
+is the CORRECT answer, not a failure to do your job.
+- Never flag: plain factual sentences; ordinary concrete anecdotes; a list \
+whose items are genuinely parallel facts; modest rounded figures; a direct \
+question the text then answers.
+- Every "quote" must be text that appears VERBATIM in the draft, copied \
+exactly, so the repair step can find and fix it.
 
 Return ONLY a JSON object, no prose:
-{"violations": [{"quote": "exact offending text, max 20 words", "problem": \
-"which move and why, max 25 words"}]}
-Return {"violations": []} if the draft is genuinely clean."""
+{"violations": [{"quote": "exact verbatim offending text, max 20 words", \
+"problem": "which move and why, max 25 words"}]}
+Return {"violations": []} if the draft is clean."""
 
 
 def _extract_json(raw: str):
@@ -413,6 +424,56 @@ def sibling_summary(draft: dict) -> str:
     for a in anecdotes[:2]:
         lines.append(f"Anecdote: {a}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Repair convergence helpers
+# ---------------------------------------------------------------------------
+# The 2026-08-24 repair pass judged its own repairs by total violation count.
+# The judge is strict and slightly different on every read, so it would fix
+# the quoted sentences and then flag DIFFERENT borderline ones; the count
+# didn't drop, the repair was discarded, and the original flags reached the
+# email unfixed. Acceptance must be deterministic: a repair is good when the
+# SPECIFIC quoted fragments are gone and the regex layer got no worse.
+
+def extract_fragment(tell: str) -> str:
+    """Pull the quoted fragment out of a 'label: "fragment"' tell string."""
+    m = re.search(r':\s*"(.*)"\s*$', tell)
+    return m.group(1) if m else ""
+
+
+def _frag_key(fragment: str) -> str:
+    """Normalised comparison key. Uses the first 60 characters so truncated
+    quotes (the hit formatter caps fragments) still match their source."""
+    norm = re.sub(r"\s+", " ", (fragment or "").replace("’", "'")).strip().lower()
+    return norm[:60]
+
+
+def fragments_gone(tells: list, text: str) -> bool:
+    """True when none of the tells' quoted fragments still appear in text."""
+    hay = re.sub(r"\s+", " ", _plain(text)).lower()
+    for t in tells:
+        key = _frag_key(extract_fragment(t))
+        if len(key) >= 12 and key in hay:
+            return False
+    return True
+
+
+def reproducible_judge_tells(judge_tells: list, second_hits: list) -> list:
+    """Stability filter for the email warnings: a judge finding only counts
+    if a SECOND independent judge pass flags overlapping text. One-off
+    borderline opinions are noise and must not reach the reviewer."""
+    second_keys = [_frag_key(h.get("fragment", "")) for h in second_hits]
+    stable = []
+    for t in judge_tells:
+        key = _frag_key(extract_fragment(t))
+        if len(key) < 12:
+            continue
+        for sk in second_keys:
+            if len(sk) >= 12 and (key[:40] in sk or sk[:40] in key):
+                stable.append(t)
+                break
+    return stable
 
 
 def warning_strip_html(hits_or_strings: list) -> str:
