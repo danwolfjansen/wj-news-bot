@@ -133,11 +133,17 @@ class FakeClient:
         self.messages = self
 
     def create(self, **kw):
-        if "copy chief" in (kw.get("system") or ""):
+        system = kw.get("system") or ""
+        if "copy chief" in system:
             self.judge_calls += 1
             reply = (self.judge_replies.pop(0) if self.judge_replies
                      else '{"violations": []}')
             return FakeResp(reply)
+        if system.startswith("You are the sub-editor"):
+            # Headline desk: always offers a clean trade-press headline, and
+            # is not counted as a draft-generation call.
+            self.desk_calls = getattr(self, "desk_calls", 0) + 1
+            return FakeResp('{"headlines": ["Four DACH clients pause S/4HANA hiring"]}')
         self.calls.append(kw)
         return FakeResp(self.replies.pop(0))
 
@@ -219,7 +225,10 @@ expect(jr.get("style_warnings") == [], "judge-clean second draft carries no warn
 # Reproducibly-dirty: judge returns the same finding on every pass, including
 # the final stability pass -> it must surface. (1 initial + 2 rewrites +
 # 3 adopted repairs = 6 gen calls; 6 checks + 1 stability = 7 judge calls.)
-jc2 = FakeClient([GOOD] * 6, judge_replies=[JF] * 7)
+STUCK = json.loads(GOOD)
+STUCK["excerpt"] = "This puts a number on something leaders have felt for years."
+STUCK = json.dumps(STUCK)
+jc2 = FakeClient([STUCK] * 6, judge_replies=[JF] * 7)
 jr2 = news_bot.rewrite_story(story, jc2)
 expect(any(w.startswith("judge:") for w in jr2.get("style_warnings", [])),
        "reproducible judge finding still surfaces in style_warnings")

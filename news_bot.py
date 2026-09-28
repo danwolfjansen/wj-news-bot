@@ -23,8 +23,10 @@ import uuid
 import fcntl
 import sys
 import base64
+import re
 
 import style_guard
+import run_guard
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone
@@ -470,37 +472,12 @@ Read the draft back as if a specialist recruiter were saying it in a meeting.
 If any sentence sounds like a thought-leader blog caption or a LinkedIn guru
 post, rewrite it. Plain, direct, with a concrete point.
 
-## Headline rules
-The title must be punchy and original. Use a wide variety of structures — rotate
-through these ten approaches and never use the same structure twice in one batch:
-
-1. Direct market observation: "SAP is quietly reshaping how finance teams hire"
-2. Tension or contradiction: "More AI budget, fewer AI hires"
-3. A question a senior professional would actually ask: "Is the CFO role becoming a tech role?"
-4. First-person trend report: "A wave of S/4HANA migration briefs hit our desk this quarter, all light on one skill"
-5. A bold specific claim: "The data skills gap in DACH is three years ahead of where most companies think"
-6. The unexpected angle: "Nobody's talking about the mid-level SAP managers caught in this"
-7. A hiring signal framed as news: "When HSBC moves like this, DACH banks follow within 18 months"
-8. The candidate's perspective: "Senior finance professionals are being asked to do something new"
-9. A market verdict: "The case for generalist CFOs just got weaker"
-10. A pattern we've spotted: "The same compliance skill keeps showing up in every Financial Advisory brief we take"
-
-BANNED headline patterns — never use regardless of structure number:
-- "What X means for Y" in any form
-- "What X tells us about Y" in any form
-- "X: What Y means for Z" (colon + what it means)
-- Any headline containing the word "momentum" or "continues"
-- The grand declarative trend-pronouncement, which is currently the default and
-  makes every title sound identical. Banned shapes and real examples:
-    * "[Thing] just became a(n) [X] problem" — "Tax compliance just became an SAP
-      data architecture problem"
-    * "The [role] seat now comes with a [X] prerequisite"
-    * "The [thing] is where the [X] war will be fought"
-    * "The [profession] is splitting in two, and the talent market knows it"
-    * Any "..., and the [market/talent market/industry] knows it" tag on the end.
-  These read as portentous captions, not headlines a recruiter would write. Prefer
-  the concrete, first-person, question, or specific-claim structures numbered above.
-Never repeat a headline structure used elsewhere in the same batch.
+## Title
+Give the "title" field a plain working title that states the news fact (who did
+what) in under 12 words. It is a placeholder: a separate sub-editor step writes
+the final headline from your finished post, so do not try to make it clever or
+"punchy", and do not put the hiring angle in it. The hiring angle belongs in the
+excerpt and the body.
 
 ## Final check before returning
 This is mandatory. Before producing the JSON output, scan every <h2> tag in the body.
@@ -549,14 +526,10 @@ Then also check:
   vacancy, spec, shortlist, requirement, hiring conversation, job description).
 - The bare "We placed a [role] last [period]" anecdote: allowed in at most one post
   per batch. If this post is not the one, recast the evidence or drop the self-reference.
-- Headline: grand trend-pronouncement shapes ("X just became a Y problem", "now
-  comes with a Y prerequisite", "is where the Y war will be fought", "is splitting
-  in two", "..., and the talent market knows it"). Rewrite to something concrete.
 - The word "firm" or "firms" anywhere. Replace with "company"/"companies".
 - Phrases: "play out", "unfold", "in real time", "worth noting", "the signal",
   "Here's the", "Here's what", "12 to 18 months" appearing more than once across
   the batch. Rewrite.
-- Headline containing "What X means", "What X tells us", "momentum", "continues". Rewrite.
 - Reworded contrastive pivots: "Neither X nor Y", "X is/are (not) wrong, but Y",
   "the headline/framing is about X but Y", "the subtext/real story is...". Rewrite.
 - Abstract-motion fragments: "the [noun] signal is clear", "the [noun] is clear",
@@ -580,7 +553,7 @@ Do not output the JSON until all checks pass.
 ## Output format
 Return ONLY a JSON object with these fields:
 {
-  "title": "A punchy, original headline written from our perspective (not copied from the source)",
+  "title": "A plain working title stating the news fact (the final headline is written separately)",
   "excerpt": "2–3 sentences in first person, teasing our take on the story",
   "body": "The full post in HTML format. Use <p> and <strong> tags only. DO NOT use
            <h2> or any subheadings. Write in flowing prose paragraphs — 4 to 6 paragraphs,
@@ -977,74 +950,161 @@ def is_story_relevant(story: dict, division_key: str, client: anthropic.Anthropi
         return True
 
 
-_BANNED_HEADLINE_FRAGMENTS = [
-    "what this means", "what that means", "what it means",
-    "what they mean", "what these mean",
-    "what this tells us", "what that tells us", "what it tells us",
-    "what we're watching", "what we are watching",
-    "momentum", " continues",
-    # Grand declarative trend-pronouncement shapes (the current default look)
-    "just became", "now comes with", "splitting in two",
-    "war will be fought", "and the talent market knows",
-    "market knows it", "and the market knows",
-]
-
-def _headline_is_banned(title: str) -> bool:
-    t = title.lower()
-    return any(frag in t for frag in _BANNED_HEADLINE_FRAGMENTS)
-
-
-def _enforce_headline(title: str, story: dict, client: anthropic.Anthropic,
-                      max_attempts: int = 3) -> str:
-    """If the generated headline uses a banned pattern, ask Claude to rewrite
-    just the title until it passes or we run out of attempts."""
-    if not _headline_is_banned(title):
-        return title
-
-    log.warning(f"  Banned headline pattern detected: '{title}' — regenerating")
-    prompt = f"""The following headline uses a banned pattern and must be rewritten:
-
-BANNED HEADLINE: {title}
-
-Story context:
-- Source: {story['source']}
-- Division: {story['division']}
-- Original title: {story['title']}
-- Summary: {story['summary'][:300]}
-
-Write ONE new headline that:
-- Does NOT contain "what this means", "what it means", "what tells us",
-  "momentum", or any "What X means for Y" construction
-- Is punchy and specific to this story
-- Uses one of these structures: a direct market observation, a tension/contradiction,
-  a bold specific claim, a market verdict, or a candidate's-eye observation
-- Is under 12 words
-
-Return ONLY the headline text, nothing else."""
-
-    for attempt in range(max_attempts):
-        try:
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=60,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            new_title = resp.content[0].text.strip().strip('"').strip("'")
-            if not _headline_is_banned(new_title):
-                log.info(f"  Headline replaced: '{new_title}'")
-                return new_title
-            log.warning(f"  Attempt {attempt+1} still banned: '{new_title}'")
-        except Exception as e:
-            log.warning(f"  Headline regeneration failed: {e}")
-            break
-
-    log.warning("  Could not fix headline — using original")
-    return title
-
-
 # ---------------------------------------------------------------------------
-# STEP 2b: Rewrite with Claude
+# HEADLINE DESK
 # ---------------------------------------------------------------------------
+# Headlines used to come out of the essay prompt, which asked for "punchy"
+# titles and supplied ten template structures ("SAP is quietly reshaping how
+# finance teams hire", "Nobody's talking about...", "...just got weaker").
+# The feed became one template: [thing] is reshaping / changes / is creating
+# [who gets hired]. A backup rewriter then asked a smaller model for "a bold
+# specific claim", and its output skipped every style check.
+#
+# Now the essay prompt writes only a working title, and this desk writes the
+# real headline from the finished post, the way a trade-press sub-editor
+# would: the news fact, in plain words. Every candidate goes through
+# style_guard.headline_tells() before it can ship. The Wolf Jansen angle
+# stays where it reads naturally: in the excerpt directly underneath.
+
+HEADLINE_DESK_PROMPT = """You are the sub-editor on a specialist trade title, working in the house
+style of the Financial Times, Handelsblatt, ERP Today and CFO Dive. You write
+the headline for a short news-commentary post published by Wolf Jansen, a
+specialist recruitment company. The post's angle is carried by the excerpt
+printed beneath the headline. The headline's only job is to say, plainly,
+what happened.
+
+WRITE IT LIKE THIS
+- State the news fact: who did what. Name the company, product, person,
+  regulator or figure from the story.
+- One clause: subject, then a plain concrete verb, then the object. Verbs like
+  hires, names, moves, buys, cuts, adds, launches, delays, drops, pays,
+  charges, opens, finds, ranks, replaces, raises, loses.
+- 5 to 11 words. Sentence case. No full stop at the end.
+- News-style attribution is fine: ", Gallup finds".
+
+NEVER
+- Any claim about hiring, careers, "who gets hired", job specs or "what
+  companies want". That is the excerpt's job, not the headline's.
+- Transformation verbs: reshape, rewrite, redefine, transform, change who,
+  change what, is creating, is becoming, signals, tells us.
+- Timing theatre: is about to, just [did], will reshape, now, quietly.
+- Teasers: nobody, everyone, every X, one trait, the same point, a familiar
+  problem, the skill most companies are missing.
+- Questions, colons, "Why...", "When X, Y", ", and that changes...", ", but...".
+- Metaphors and hype nouns: push, pivot, spree, squeeze, ripple, erosion,
+  dominance, in disguise.
+- "The [person] who..." openings. The words you and your.
+- Copying the source's headline. Write your own.
+
+EXAMPLES (every BAD one was really published; do not produce anything like them)
+  BAD:  Carve-out assessments just dropped from six weeks to seven days. Here's who benefits.
+  GOOD: SAP and PwC cut carve-out assessments to seven days
+  BAD:  When a 190,000-person company consolidates HR onto SAP, the ripple reaches every consulting team in DACH
+  GOOD: NTT Data moves 190,000 staff onto SAP SuccessFactors
+  BAD:  Knowledge graph specialists are about to become much harder to find
+  GOOD: Oakley Capital takes majority stake in Graphwise
+  BAD:  Why consumer goods companies keep poaching finance leaders from tobacco
+  GOOD: Coty hires its new CFO from British American Tobacco
+  BAD:  The middle management squeeze is about to shape who gets promoted
+  GOOD: Managers' teams have grown by nearly half, Gallup finds
+
+Use only facts that appear in the material you are given. Never invent a
+name, number or detail.
+
+Return ONLY a JSON object: {"headlines": ["best", "second", ...]} with six
+different candidates, best first."""
+
+HEADLINE_COPY_THRESHOLD = 0.8   # word overlap with the source title
+
+
+def _headline_candidates(client, user_msg: str) -> list:
+    """One desk call -> list of candidate strings ([] on any failure)."""
+    try:
+        resp = client.messages.create(
+            model="claude-opus-4-5-20251101",
+            max_tokens=500,
+            system=HEADLINE_DESK_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        obj = style_guard._extract_json(resp.content[0].text or "")
+    except Exception as e:
+        log.warning(f"  Headline desk call failed: {e}")
+        return []
+    heads = (obj or {}).get("headlines") or []
+    out = []
+    for h in heads:
+        if isinstance(h, str):
+            h = h.strip().strip('"').strip("'").rstrip(".").strip()
+            if h:
+                out.append(h)
+    return out
+
+
+def write_headline(client, result: dict, story: dict,
+                   sibling_titles: list) -> tuple:
+    """Write the final headline for a finished draft.
+    Returns (headline, warnings). warnings is empty unless no clean headline
+    could be produced by any route, which should be vanishingly rare."""
+    source_title = story.get("title", "")
+    body_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", result.get("body", ""))).strip()
+    siblings = [t for t in (sibling_titles or []) if t]
+    user_msg = (
+        f"Source: {story.get('source', '')}\n"
+        f"Source headline (for facts only, do not copy): {source_title}\n"
+        f"Source summary: {story.get('summary', '')[:800]}\n\n"
+        f"Our post's excerpt: {result.get('excerpt', '')}\n"
+        f"Our post: {body_text[:1800]}\n"
+    )
+    if siblings:
+        user_msg += ("\nHeadlines already used in today's batch (make yours "
+                     "read differently):\n" + "\n".join(f"- {t}" for t in siblings))
+
+    seen_candidates = []
+
+    def pick(cands):
+        for c in cands:
+            if style_guard.headline_similarity(c, source_title) >= HEADLINE_COPY_THRESHOLD:
+                seen_candidates.append((c, ["near-copy of the source headline"]))
+                continue
+            tells = style_guard.headline_tells(c)
+            seen_candidates.append((c, tells))
+            if not tells:
+                return c
+        return None
+
+    chosen = pick(_headline_candidates(client, user_msg))
+    if chosen:
+        log.info(f"  Headline: {chosen}")
+        return chosen, []
+
+    # Second attempt: show the desk exactly what it got wrong.
+    if seen_candidates:
+        rejected = "\n".join(f'- "{c}"  ({"; ".join(t[:3])})' for c, t in seen_candidates)
+        retry_msg = (user_msg + "\n\nREJECTED. These headlines broke the rules for "
+                     "the reasons given. Write six new ones that state the news "
+                     "fact plainly:\n" + rejected)
+    else:
+        retry_msg = user_msg
+    chosen = pick(_headline_candidates(client, retry_msg))
+    if chosen:
+        log.info(f"  Headline (second attempt): {chosen}")
+        return chosen, []
+
+    # Fallback 1: the source's own headline was written by a journalist. If it
+    # passes the linter, it is a safe, factual, human headline.
+    if source_title and not style_guard.headline_tells(source_title):
+        log.warning(f"  Headline desk found nothing clean; using the source "
+                    f"headline: {source_title}")
+        return source_title, []
+
+    # Fallback 2: the least-bad candidate, with its problems made visible.
+    if seen_candidates:
+        c, tells = min(seen_candidates, key=lambda ct: len(ct[1]))
+        log.warning(f"  No clean headline available; best effort: {c}")
+        return c, [f"headline: {t}" for t in tells]
+    working = result.get("title") or source_title or "Untitled"
+    return working, [f"headline: {t}" for t in style_guard.headline_tells(working)]
+
 def _variety_brief(prior_drafts: Optional[list]) -> str:
     """Build a constraint block listing the openers/closers already used in this
     run, so each new post is told to differ in structure. This is what makes the
@@ -1110,7 +1170,8 @@ the body with a link back to the original source at {story['link']}.
         tells = _detect_ai_tells(draft)
         judge_hits = style_guard.judge_draft(
             client,
-            {f: draft.get(f, "") for f in ("title", "excerpt", "body")},
+            # Excerpt and body only: the headline desk owns the title.
+            {f: draft.get(f, "") for f in ("excerpt", "body")},
             siblings=siblings, context="news")
         return tells + style_guard.format_hits(judge_hits)
 
@@ -1182,7 +1243,7 @@ the body with a link back to the original source at {story['link']}.
         if judge_tells:
             second = style_guard.judge_draft(
                 client,
-                {f: result.get(f, "") for f in ("title", "excerpt", "body")},
+                {f: result.get(f, "") for f in ("excerpt", "body")},
                 siblings=siblings, context="news")
             stable = style_guard.reproducible_judge_tells(judge_tells, second)
             dropped = len(judge_tells) - len(stable)
@@ -1190,16 +1251,28 @@ the body with a link back to the original source at {story['link']}.
                 log.info(f"  Stability filter dropped {dropped} "
                          f"non-reproducible judge finding(s)")
             tells = [t for t in tells if not t.startswith("judge:")] + stable
-        # Hard-reject banned headline patterns and regenerate title only.
-        if isinstance(result, dict) and result.get("title"):
-            result["title"] = _enforce_headline(result["title"], story, client)
+        # HEADLINE DESK. The body is now final, so the headline is written
+        # from it by a dedicated sub-editor step and linted before it ships.
+        # (The essay's own title field is only a working title.)
+        headline_warnings = []
+        if isinstance(result, dict):
+            sibling_titles = [d.get("title", "") for d in (prior_drafts or [])]
+            result["title"], headline_warnings = write_headline(
+                client, result, story, sibling_titles)
         # Anything that survived the retries is surfaced on the approval email
         # card so it can be reviewed by a human before publishing — a dirty
         # draft must never reach the inbox looking identical to a clean one.
-        # (Regex re-runs cheaply post-headline-fix; judge findings carry over.)
+        # The headline has its own checks above, so body findings are
+        # recomputed on excerpt+body only, and a judge finding is kept only if
+        # its quoted text is still in the post (the old title is gone).
         if isinstance(result, dict):
-            judge_left = [t for t in tells if t.startswith("judge:")]
-            result["style_warnings"] = _detect_ai_tells(result) + judge_left
+            final_text = " ".join(str(result.get(f, ""))
+                                  for f in ("title", "excerpt", "body"))
+            judge_left = [t for t in tells if t.startswith("judge:")
+                          and not style_guard.fragments_gone([t], final_text)]
+            body_tells = style_guard.format_hits(
+                style_guard.detect_fields(result, fields=("excerpt", "body")))
+            result["style_warnings"] = body_tells + judge_left + headline_warnings
             if result["style_warnings"]:
                 log.warning(f"  UNRESOLVED violations going to review: "
                             f"{result['style_warnings'][:6]}")
@@ -1275,7 +1348,9 @@ def _detect_ai_tells(result: dict) -> list:
     more reliable than naming the abstract pattern."""
     if not isinstance(result, dict):
         return []
-    hits = style_guard.detect_fields(result, context="news")
+    # Excerpt and body: the headline is linted separately by the headline desk.
+    hits = style_guard.detect_fields(result, fields=("excerpt", "body"),
+                                     context="news")
     return style_guard.format_hits(hits)
 
 
@@ -1550,14 +1625,38 @@ def send_approval_email(new_drafts: list[dict]):
             server.login(smtp_user, smtp_pass)
             server.sendmail(smtp_user, recipients, msg.as_string())
         log.info(f"✉  Approval email sent to {', '.join(recipients)}")
+        return True
     except Exception as e:
         log.error(f"Failed to send email: {e}")
+        _RUN_ERRORS.append(f"approval email send: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
 # LOCK FILE — prevents two instances running at the same time
 # ---------------------------------------------------------------------------
 _LOCK_PATH = os.path.join(os.path.expanduser("~/.newsbot"), "newsbot.lock")
+
+
+def _drafts_registered_today() -> bool:
+    """Backstop for the delivery guard, from the bot's own records: True if
+    drafts were already registered today. Stops a duplicate digest if the
+    delivery ledger failed to write."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/London")
+    except Exception:
+        tz = timezone.utc
+    today = datetime.now(tz).date()
+    for entry in (load_pending() or {}).values():
+        try:
+            created = datetime.fromisoformat(
+                entry.get("created", "").replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if created.astimezone(tz).date() == today:
+            return True
+    return False
 
 
 def send_failure_alert_email(subject_line: str, detail: str):
@@ -1632,6 +1731,17 @@ def main():
         log.info(f"Wolf Jansen News Bot — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
         log.info("=" * 60)
 
+        # DELIVERY WINDOW. The workflow fires hourly because GitHub delays
+        # scheduled runs by anything from 1 to 12 hours; this picks the first
+        # run inside the UK morning window and stands every other run down
+        # before a single feed is fetched, so nothing is consumed.
+        ok, why = run_guard.should_deliver(
+            "news", fallback_delivered_today=_drafts_registered_today)
+        if not ok:
+            log.info(f"Standing down: {why}")
+            return
+        log.info(f"Delivering: {why}")
+
         seen = load_seen_stories()
         log.info(f"Already processed: {len(seen)} stories")
 
@@ -1691,9 +1801,13 @@ def main():
         log.info(f"\n{len(new_drafts)} draft(s) ready.")
 
         if new_drafts:
-            send_approval_email(new_drafts)
+            if send_approval_email(new_drafts):
+                if not run_guard.mark_delivered("news"):
+                    _RUN_ERRORS.append("could not record today's delivery; "
+                                       "a later run may send a duplicate")
         else:
-            log.info("No new stories found — nothing to send.")
+            log.info("No new stories found — nothing to send. "
+                     "(Later runs in the window will look again.)")
 
         # Never fail silently: "no email" must only ever mean "no news".
         if _RUN_ERRORS and (not new_drafts or len(_RUN_ERRORS) >= 3):

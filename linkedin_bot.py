@@ -49,6 +49,7 @@ from news_bot import (
 )
 
 import style_guard
+import run_guard
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1821,9 +1822,18 @@ def main():
              f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     log.info("=" * 60)
 
+    # Hourly workflow + this guard: first run in Thursday's UK morning window
+    # delivers; every other run stands down before doing any work.
+    ok, why = run_guard.should_deliver("linkedin", days=run_guard.THURSDAY)
+    if not ok:
+        log.info(f"Standing down: {why}")
+        return
+    log.info(f"Delivering: {why}")
+
     pool = candidate_pool()
     if not pool:
         send_no_linkedin_email()
+        run_guard.mark_delivered("linkedin")   # nothing to post; done for today
         return
 
     ai_client = anthropic.Anthropic(api_key=CONFIG["anthropic_api_key"])
@@ -1864,6 +1874,7 @@ def main():
     )
     send_linkedin_approval_email(token, rewritten["post_text"], pick, wp_url,
                                  image_urls, rewritten.get("style_warnings"))
+    run_guard.mark_delivered("linkedin")
 
     log.info("=" * 60)
 

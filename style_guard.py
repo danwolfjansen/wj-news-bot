@@ -476,6 +476,93 @@ def reproducible_judge_tells(judge_tells: list, second_hits: list) -> list:
     return stable
 
 
+# ---------------------------------------------------------------------------
+# Headline linter
+# ---------------------------------------------------------------------------
+# Headlines have their own failure mode, distinct from body prose. Of the 40
+# headlines published to wolfjansen.com in the fortnight to 2026-09-28, nearly
+# every one was the same template:
+#     [SAP/AI thing] + [is reshaping / changes / is creating / is about to]
+#                    + [who gets hired / what companies want]
+# decorated with teasers ("nobody", "the skill most companies are missing"),
+# "quietly", "just", and two-clause ", and that changes who gets hired" tails.
+# The old prompt literally supplied these as its ten example structures.
+#
+# A human sub-editor at a trade title writes the news fact: who did what, in
+# plain words. The linter rejects everything else; it is deliberately strict,
+# because the headline writer produces several candidates and needs only one
+# to survive.
+
+MAX_HEADLINE_WORDS = 12
+
+_HEADLINE_PATTERNS = [
+    ("transformation verb",               _c(r"\b(?:reshap\w*|rewr(?:ite|ites|iting|itten|ote)|redefin\w*|transform\w*|revolutioni[sz]\w*|upend\w*|disrupt\w*|remak\w*|overhaul\w* (?:how|what|who))\b")),
+    ("'changes who/what/how'",            _c(r"\bchang(?:e|es|ed|ing)\s+(?:who|what|how|which|where|the\s+(?:rules|game|shape|math|maths|calculus))\b")),
+    ("'is creating/becoming/starting to'", _c(r"\b(?:is|are)\s+(?:creating|becoming|starting\s+to|beginning\s+to|turning\s+into|emerging\s+as|shaping|driving|fuel(?:l)?ing|redrawing)\b")),
+    ("'a new kind/breed of'",             _c(r"\ba\s+new\s+(?:kind|breed|class|type|generation|era|wave|filter|layer)\b")),
+    ("'signals / tells us'",              _c(r"\bsignal(?:s|ling|ing|ed)?\b|\btells?\s+us\b|\bsays\s+(?:a\s+lot|something|more)\b|\bsomething\s+about\b")),
+    ("portentous 'about to / just'",      _c(r"\b(?:is|are)\s+about\s+to\b|\bjust\s+(?:got|made|became|dropped|rewrote|changed|raised|killed|ended|opened|closed|\w+ed)\b")),
+    ("portentous 'will reshape/define'",  _c(r"\bwill\s+(?:reshape|change|surface|define|decide|redefine|determine|reward|punish|expose)\b")),
+    ("'quiet/quietly'",                   _c(r"\bquiet(?:ly)?\b")),
+    ("teaser: nobody/everyone/every X",   _c(r"\b(?:nobody|no\s+one|everyone|everybody)\b|\bevery\s+(?:manufacturer|company|cfo|team|recruiter|hiring|employer|business|leader)\b")),
+    ("teaser: 'most X are missing/not ready'", _c(r"\bmost\s+\w+(?:\s+\w+)?\s+(?:are|is)\s+(?:missing|not\s+ready|getting\s+wrong|overlooking|ignoring)\b|\bthe\s+\w+\s+most\s+\w+\s+(?:are|is)\s+missing\b")),
+    ("teaser: curiosity gap",             _c(r"\bshares?\s+one\b|\bthe\s+same\s+(?:point|place|problem|mistake|wall|gap)\b|\ba\s+(?:very\s+)?(?:specific|familiar|surprising|hidden|different|curious|new)\s+(?:\w+\s+)?(?:problem|question|trait|skill|filter|requirement|twist|lesson|role)\b|\bone\s+(?:trait|thing|question|skill|mistake)\b")),
+    ("'The X who/that...' opener",        _c(r"^the\s+(?:\w+[\s-]){0,3}\w+\s+(?:who|that|nobody|everyone|most)\b")),
+    ("two-clause ', and/but' tail",       _c(r",\s+(?:and|but|yet|so)\s+")),
+    ("'When X, ...' frame",               _c(r"^when\s+")),
+    ("'Why X' explainer",                 _c(r"^why\s+|\band\s+why\b")),
+    ("question headline",                 _c(r"\?\s*$")),
+    ("colon / two-part headline",         _c(r":\s|\.\s+\S")),
+    # "push"/"pivot"/"bet" are fine as verbs ("costs push budgets up") but a
+    # tell as possessive hype nouns ("SAP's AI push", "SAP's AI pivot").
+    ("possessive hype noun",              _c(r"'s\s+(?:[\w/-]+\s+){0,3}(?:push|pivot|dominance|bet|gambit|play|drive|spree|moment|playbook)\b")),
+    ("hype noun",                         _c(r"\b(?:spree|arms\s+race|gold\s+rush|land\s*grab|shake-?up|reckoning|squeeze|erosion|ripple|wake-?up\s+call|game[\s-]?changer|tipping\s+point|inflection\s+point|sea\s+change|paradigm)\b")),
+    ("figurative motion verb",            _c(r"\b(?:is|are)\s+(?:steering|tilting|nudging|filtering|seeping|trickling|spilling|bleeding|creeping|rippling|landing\s+on)\b")),
+    ("then/now 'used to'",                _c(r"\bused\s+to\b")),
+    ("hiring-abstraction tail",           _c(r"\bwho\s+gets\s+(?:hired|shortlisted|promoted)\b|\bhiring\s+(?:problem|briefs?|filter|question|equation|calculus|landscape|signal|conversations?|desks?|managers\s+should)\b|\bjob\s+specs?\b|\bjob\s+specifications?\b|\bwhat\s+(?:companies|clients|employers|hiring\s+managers|cfos?|boards?|finance\s+teams)\s+(?:want|need|expect|ask\s+for|look\s+for|value)\b")),
+    ("'where X is headed'",               _c(r"\bwhere\s+(?:\w+\s+){0,3}(?:is|are)\s+(?:headed|heading|going)\b|\bis\s+where\b")),
+    ("'the gap between'",                 _c(r"\bthe\s+gap\s+between\b")),
+    ("'puts a question to'",              _c(r"\bputs?\s+a\s+question\b")),
+    ("'actually'",                        _c(r"\bactually\b")),
+    ("'is now / are now'",                _c(r"\b(?:is|are)\s+now\b|\bnow\s*$")),
+    ("'should pay attention'",            _c(r"\bshould\s+(?:pay\s+attention|take\s+note|watch|worry)\b")),
+    ("'keeps showing up'",                _c(r"\bkeeps?\s+(?:showing|turning|popping)\s+up\b|\bshow(?:s|ing)?\s+up\s+in\b")),
+    ("'in disguise / real story'",        _c(r"\bin\s+disguise\b|\breal\s+(?:story|problem|question|reason|cost)\b|\bhidden\s+(?:cost|problem|risk|story)\b")),
+    ("'X is a Y problem'",                _c(r"\bis\s+(?:a|an|your)\s+(?:\w+\s+)?problem\b|\bbecome\s+(?:a|an|your)\s+(?:\w+\s+)?problem\b")),
+    ("second-person 'you/your'",          _c(r"\byou(?:r|'re)?\b")),
+]
+
+
+def headline_tells(title: str) -> list:
+    """All reasons a headline reads as machine-written. Empty list = clean.
+    Combines the headline-specific patterns with the general prose detector,
+    so a headline can never smuggle in a tell the body would be caught for."""
+    t = re.sub(r"\s+", " ", (title or "").replace("’", "'")).strip()
+    found = []
+    if not t:
+        return ["empty headline"]
+    words = len(t.split())
+    if words > MAX_HEADLINE_WORDS:
+        found.append(f"too long: {words} words (max {MAX_HEADLINE_WORDS})")
+    for label, pat in _HEADLINE_PATTERNS:
+        m = pat.search(t)
+        if m:
+            found.append(f'{label}: "{m.group(0).strip()}"')
+    for h in detect(t):
+        found.append(f'{h["label"]}: "{h["fragment"]}"')
+    return found
+
+
+def headline_similarity(a: str, b: str) -> float:
+    """Word-overlap ratio, used to stop the writer copying the source's title
+    verbatim."""
+    wa = set(re.findall(r"[a-z0-9]+", (a or "").lower()))
+    wb = set(re.findall(r"[a-z0-9]+", (b or "").lower()))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
 def warning_strip_html(hits_or_strings: list) -> str:
     """Amber warning box for the approval email when tells survive retries.
     Accepts either detect() hit dicts or pre-formatted strings."""

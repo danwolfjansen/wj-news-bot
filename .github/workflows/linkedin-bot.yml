@@ -2,7 +2,12 @@ name: Wolf Jansen LinkedIn Bot
 
 on:
   schedule:
-    - cron: '0 7 * * 4'   # Thursdays 07:00 UTC = 09:00 CEST (summer) / 08:00 CET (winter)
+    # Hourly on Wednesdays and Thursdays (UTC), for the same reason as the
+    # news bot: GitHub's delay drifts by hours. Wednesday runs matter when
+    # the delay is long enough to carry them into Thursday morning.
+    # run_guard.py delivers on the first run in Thursday's 07:00-12:00 UK
+    # window and stands every other run down.
+    - cron: '29 * * * 3,4'
   workflow_dispatch:        # Allow manual "Run workflow" from GitHub UI
     inputs:
       ignore_consumed:
@@ -16,6 +21,10 @@ on:
 
 permissions:
   contents: write    # Required to commit generated images back to the repo
+
+concurrency:
+  group: linkedin-bot
+  cancel-in-progress: false
 
 jobs:
   run:

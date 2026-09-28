@@ -2,8 +2,20 @@ name: Wolf Jansen News Bot
 
 on:
   schedule:
-    - cron: '0 7 * * 1-5'   # 7:00 AM UTC = 9:00 AM CEST (summer) / 8:00 AM CET (winter)
+    # Hourly, around the clock, at an off-peak minute. GitHub creates
+    # scheduled runs anywhere from 1 to 12 hours late (the old 07:00 slot was
+    # landing at 1:30-4pm UK in September, and 7-8pm in late August), so a
+    # single morning slot cannot work. run_guard.py lets exactly one run per
+    # weekday deliver: the first inside the 07:00-12:00 UK window. All the
+    # others stand down in seconds without touching the feeds.
+    - cron: '17 * * * *'
   workflow_dispatch:          # Allow manual "Run workflow" from GitHub UI
+
+# Delayed runs can arrive in a bunch. Run them one at a time, so the second
+# sees the first's delivery record and stands down instead of sending twice.
+concurrency:
+  group: newsbot
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -41,6 +53,9 @@ jobs:
           MS_CLIENT_ID:       ${{ secrets.MS_CLIENT_ID }}
           MS_CLIENT_SECRET:   ${{ secrets.MS_CLIENT_SECRET }}
           MS_USER_EMAIL:      ${{ secrets.MS_USER_EMAIL }}
+          # run_guard.py reads/writes last_delivery.json through the API.
+          GITHUB_TOKEN:       ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY:  ${{ github.repository }}
         run: python news_bot.py
 
       - name: Commit updated seen_stories.json
