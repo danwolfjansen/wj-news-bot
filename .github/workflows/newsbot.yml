@@ -59,6 +59,10 @@ jobs:
         run: python news_bot.py
 
       - name: Commit updated seen_stories.json
+        # Run even when the bot step fails: the bot exits non-zero on a
+        # OneDrive failure AFTER sending the digest, and skipping this commit
+        # would make tomorrow's run rewrite the same stories.
+        if: ${{ !cancelled() }}
         run: |
           git config user.name  "WJ News Bot"
           git config user.email "bot@wolfjansen.com"
