@@ -24,6 +24,7 @@ import fcntl
 import sys
 import base64
 import re
+from html import escape as html_escape
 
 import style_guard
 import run_guard
@@ -609,10 +610,28 @@ def story_id(entry) -> str:
 # ---------------------------------------------------------------------------
 # HELPERS: pending drafts (stored in OneDrive)
 # ---------------------------------------------------------------------------
+# OneDrive problems in this run, in plain words. Non-empty means the drafts
+# did NOT reach pending_approvals.json, so Power Automate cannot mark them as
+# published and the LinkedIn bot will never see them. The approval email
+# carries a warning and the run exits non-zero (red in GitHub Actions).
+_ONEDRIVE_ERRORS: list = []
+
+# Set once a download fails. After that, the local copy holds only this run's
+# drafts, so uploading it would overwrite the full OneDrive file with a
+# partial one. Sticky for the rest of the run.
+_ONEDRIVE_DOWNLOAD_FAILED = False
+
+
+def _note_onedrive_error(msg: str):
+    if msg not in _ONEDRIVE_ERRORS:
+        _ONEDRIVE_ERRORS.append(msg)
+
+
 def _download_pending_via_graph() -> dict:
     """Download pending_approvals.json from OneDrive via Microsoft Graph API.
     Used in GitHub Actions where there is no local OneDrive sync folder.
     """
+    global _ONEDRIVE_DOWNLOAD_FAILED
     import requests as _req
     tenant = os.getenv("MS_TENANT_ID", "").strip()
     client = os.getenv("MS_CLIENT_ID", "").strip()
@@ -637,10 +656,14 @@ def _download_pending_via_graph() -> dict:
             data = resp.json()
             log.info(f"  Downloaded pending_approvals.json from OneDrive ({len(data)} entries).")
             return data
-        log.warning(f"  Graph download returned {resp.status_code} — starting fresh.")
-        return {}
+        if resp.status_code == 404:
+            log.warning("  pending_approvals.json not found on OneDrive — starting fresh.")
+            return {}
+        raise RuntimeError(f"download returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
-        log.warning(f"  Graph API download failed: {e}")
+        _ONEDRIVE_DOWNLOAD_FAILED = True
+        _note_onedrive_error(f"could not read pending_approvals.json from OneDrive ({e})")
+        log.error(f"  Graph API download failed: {e}")
         return {}
 
 
@@ -702,6 +725,7 @@ def save_pending(data: dict):
                     time.sleep(5)
                 else:
                     log.error(f"  OneDrive sync failed after retries: {e}")
+                    _note_onedrive_error(f"could not write to the OneDrive folder ({e})")
                     return
 
     # Path 2 — GitHub Actions / no local OneDrive mount: upload via Microsoft Graph API.
@@ -726,6 +750,16 @@ def _upload_pending_via_graph(local_path: str):
 
     if not all([tenant, client, secret, user]):
         log.warning("  MS Graph credentials not set — pending_approvals.json not uploaded to OneDrive.")
+        _note_onedrive_error("Microsoft Graph credentials are not set, so nothing was uploaded to OneDrive")
+        return
+
+    if _ONEDRIVE_DOWNLOAD_FAILED:
+        # The local file holds only this run's drafts. Uploading it would
+        # wipe every earlier entry from the OneDrive copy.
+        log.error("  Skipping OneDrive upload: the download failed earlier in "
+                  "this run, so the local copy is incomplete and would "
+                  "overwrite the full file.")
+        _note_onedrive_error("upload to OneDrive skipped because the download failed earlier in the run")
         return
 
     try:
@@ -765,6 +799,7 @@ def _upload_pending_via_graph(local_path: str):
 
     except Exception as e:
         log.error(f"  Graph API upload failed: {e}. Power Automate will not see new drafts this run.")
+        _note_onedrive_error(f"could not upload pending_approvals.json to OneDrive ({e})")
 
 
 def create_wp_draft(title: str, body: str, excerpt: str, division: str) -> Optional[int]:
@@ -1531,6 +1566,40 @@ def _post_card_html(token: str, title: str, excerpt: str, body: str,
 </table>"""
 
 
+def _onedrive_warning(new_drafts: list[dict]) -> tuple:
+    """(html_row, plain_text) for the top of the approval email when this
+    run's drafts never reached OneDrive; ('', '') when all is well."""
+    if not _ONEDRIVE_ERRORS:
+        return "", ""
+    ids = [str(d["post_id"]) for d in new_drafts if d.get("post_id")]
+    id_line = (f"WordPress draft IDs: {', '.join(ids)}." if ids else
+               "No WordPress drafts were pre-created either.")
+    what = ("These drafts were not saved to OneDrive, so Approve &amp; Publish "
+            "may not put them live and the LinkedIn bot won't see them. If a "
+            "post isn't on wolfjansen.com a few minutes after you approve it, "
+            "publish it from the drafts in WordPress.")
+    cause = ("Most likely cause: the Microsoft client secret has expired. Make "
+             "a new one in Entra (App registrations, Certificates &amp; secrets) "
+             "and update MS_CLIENT_SECRET in the GitHub repo.")
+    detail = "; ".join(_ONEDRIVE_ERRORS)
+    html = f"""
+        <!-- OneDrive warning -->
+        <tr><td style="background:#fdecea;border-left:4px solid #c62828;padding:18px 32px;">
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#b71c1c;">
+            Action needed: drafts not saved to OneDrive
+          </p>
+          <p style="margin:0 0 8px;font-size:14px;color:#333;line-height:1.6;">{what}</p>
+          <p style="margin:0 0 8px;font-size:14px;color:#333;line-height:1.6;">{id_line}</p>
+          <p style="margin:0 0 8px;font-size:14px;color:#333;line-height:1.6;">{cause}</p>
+          <p style="margin:0;font-size:12px;color:#777;line-height:1.5;">Detail: {html_escape(detail)}</p>
+        </td></tr>
+"""
+    plain = ("ACTION NEEDED: drafts not saved to OneDrive.\n"
+             + what.replace("&amp;", "&") + "\n" + id_line + "\n"
+             + cause.replace("&amp;", "&") + "\nDetail: " + detail + "\n")
+    return html, plain
+
+
 def send_approval_email(new_drafts: list[dict]):
     if not new_drafts:
         return
@@ -1548,6 +1617,9 @@ def send_approval_email(new_drafts: list[dict]):
     count    = len(new_drafts)
     date_str = datetime.now(timezone.utc).strftime("%d %B %Y")
     subject  = f"Wolf Jansen News: {count} draft{'s' if count != 1 else ''} ready for review — {date_str}"
+    onedrive_html, onedrive_plain = _onedrive_warning(new_drafts)
+    if onedrive_html:
+        subject = "⚠ ACTION NEEDED: drafts not saved to OneDrive — " + subject
 
     cards_html = "\n".join(
         _post_card_html(d["token"], d["title"], d["excerpt"], d["body"],
@@ -1569,7 +1641,7 @@ def send_approval_email(new_drafts: list[dict]):
           <p style="margin:0;font-size:20px;font-weight:700;color:#fff;">Wolf Jansen</p>
           <p style="margin:4px 0 0;font-size:13px;color:#aaa;">News Bot — Daily Digest · {date_str}</p>
         </td></tr>
-
+{onedrive_html}
         <!-- Intro -->
         <tr><td style="background:#fff;padding:24px 32px 12px;">
           <p style="margin:0;font-size:15px;color:#333;line-height:1.6;">
@@ -1600,6 +1672,8 @@ def send_approval_email(new_drafts: list[dict]):
 
     # Plain text fallback
     plain_lines = [f"Wolf Jansen News Bot — {count} draft(s) for review\n"]
+    if onedrive_plain:
+        plain_lines.insert(0, onedrive_plain)
     for d in new_drafts:
         pid = d.get("post_id") or None
         plain_lines += [
@@ -1817,6 +1891,16 @@ def main():
                 "next run):\n\n" + "\n".join(f"- {e}" for e in _RUN_ERRORS[:10]))
 
         log.info("=" * 60)
+
+        # OneDrive failures must not end in a green run. Everything else is
+        # already done (email sent, delivery recorded, seen stories saved),
+        # so exiting non-zero here only makes the problem visible.
+        if _ONEDRIVE_ERRORS:
+            for err in _ONEDRIVE_ERRORS:
+                log.error(f"OneDrive: {err}")
+            log.error("Drafts from this run are NOT in OneDrive. Marking the "
+                      "run as failed so it shows red in GitHub Actions.")
+            sys.exit(1)
     except Exception as e:
         log.error(f"FATAL: run crashed: {e}")
         send_failure_alert_email("run crashed with an unhandled error", str(e))
