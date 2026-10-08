@@ -1,5 +1,6 @@
 .env
 news_bot.log
+linkedin_bot.log
 news_bot_launchd.log
 pending_approvals.json
 __pycache__/

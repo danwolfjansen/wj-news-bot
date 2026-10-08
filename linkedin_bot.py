@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import smtplib
+import sys
 import uuid
 import requests
 from datetime import datetime, timedelta, timezone
@@ -110,6 +111,14 @@ def _running_in_cloud() -> bool:
     return os.getenv("GITHUB_ACTIONS", "").lower() == "true"
 
 
+class OneDriveUnavailable(RuntimeError):
+    """The bot could not read its state from OneDrive (sign-in refused,
+    network error, unexpected response). This is NOT the same as "no stories":
+    an empty result here would make the run look like a quiet week, mark the
+    week as delivered and lose that Thursday's post. Callers let it propagate
+    so the run fails visibly and the next hourly run in the window retries."""
+
+
 def _get_graph_token() -> str:
     """Client-credentials OAuth flow against Microsoft Graph."""
     tenant = _MS_CONFIG["tenant_id"]
@@ -144,6 +153,9 @@ def load_pending() -> dict:
     - Locally: reads from the OneDrive sync folder configured in news_bot CONFIG.
     """
     if _running_in_cloud():
+        # Any failure raises OneDriveUnavailable rather than returning {}:
+        # this file always exists, so "couldn't read it" must never be
+        # mistaken for "no published stories this week".
         try:
             token = _get_graph_token()
             resp  = requests.get(
@@ -151,15 +163,18 @@ def load_pending() -> dict:
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=15,
             )
-            if resp.status_code == 200:
-                return resp.json()
-            log.warning(
-                f"Graph load of pending_approvals.json returned "
-                f"{resp.status_code}: {resp.text[:200]}"
-            )
         except Exception as e:
-            log.error(f"Graph load of pending_approvals.json failed: {e}")
-        return {}
+            raise OneDriveUnavailable(
+                f"Graph load of pending_approvals.json failed: {e}") from e
+        if resp.status_code != 200:
+            raise OneDriveUnavailable(
+                f"Graph load of pending_approvals.json returned "
+                f"{resp.status_code}: {resp.text[:200]}")
+        try:
+            return resp.json()
+        except ValueError as e:
+            raise OneDriveUnavailable(
+                f"pending_approvals.json from OneDrive is not valid JSON: {e}") from e
 
     folder = CONFIG.get("onedrive_folder", "").strip()
     path = os.path.join(folder, "pending_approvals.json") if folder else "pending_approvals.json"
@@ -1445,6 +1460,10 @@ def _linkedin_pending_path() -> str:
 
 def load_linkedin_pending() -> dict:
     if _running_in_cloud():
+        # A missing file (404) is a genuine empty store. Anything else raises:
+        # returning {} would let an already-shared story be picked again, and
+        # register_linkedin_draft would then overwrite the whole file with a
+        # single entry.
         try:
             token = _get_graph_token()
             resp  = requests.get(
@@ -1452,11 +1471,20 @@ def load_linkedin_pending() -> dict:
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=15,
             )
-            if resp.status_code == 200:
-                return resp.json()
         except Exception as e:
-            log.warning(f"Could not load pending_linkedin from OneDrive: {e}")
-        return {}
+            raise OneDriveUnavailable(
+                f"Graph load of pending_linkedin.json failed: {e}") from e
+        if resp.status_code == 404:
+            return {}
+        if resp.status_code != 200:
+            raise OneDriveUnavailable(
+                f"Graph load of pending_linkedin.json returned "
+                f"{resp.status_code}: {resp.text[:200]}")
+        try:
+            return resp.json()
+        except ValueError as e:
+            raise OneDriveUnavailable(
+                f"pending_linkedin.json from OneDrive is not valid JSON: {e}") from e
     path = _linkedin_pending_path()
     if os.path.exists(path):
         with open(path) as f:
@@ -1830,7 +1858,18 @@ def main():
         return
     log.info(f"Delivering: {why}")
 
-    pool = candidate_pool()
+    try:
+        pool = candidate_pool()
+    except OneDriveUnavailable as e:
+        # Do NOT mark the week as delivered: the next hourly run inside the
+        # window will try again. Exit non-zero so the run shows red in GitHub.
+        log.error(f"{e}")
+        log.error("Could not read the stories from OneDrive, so this run is "
+                  "NOT marking the week as done. The next hourly run in the "
+                  "Thursday 07:00-12:00 UK window will retry. If every run "
+                  "fails, check MS_CLIENT_SECRET and the app registration.")
+        sys.exit(1)
+
     if not pool:
         send_no_linkedin_email()
         run_guard.mark_delivered("linkedin")   # nothing to post; done for today
