@@ -1,13 +1,5 @@
 [
   {
-    "date": "2026-08-20",
-    "concepts": [
-      "Hands in close-up plugging a USB adapter into a networked PLC mounted on a factory wall, soft focus on the production floor behind, morning light from a high window.",
-      "A technician's fingers typing at a keyboard beside a dual-monitor setup displaying system diagnostics, shallow depth of field, the manufacturing floor visible as a blur through the office glass wall behind.",
-      "Tight shot of hands holding a handheld scanner aimed at a networked shop-floor device, shallow focus, the machine's control panel softly out of focus in the background."
-    ]
-  },
-  {
     "date": "2026-08-27",
     "concepts": [
       "Wide shot of a modern finance floor at golden hour, two figures at separate desks across the space\u2014one reviewing screens, the other at a tablet cross-referencing data\u2014afternoon light casting long shadows across the open plan.",
@@ -77,6 +69,14 @@
       "A modern corporate headquarters facade at dusk, glass and steel exterior, a single figure silhouetted entering through revolving doors, cool evening light reflecting off the glass.",
       "Street-level view of a finance department entrance with floor-to-ceiling windows, interior desks and monitors visible but soft and unfocused, a person in business attire approaching the glass doors from outside, golden hour sidelight.",
       "An executive parking garage entrance at street level, a figure walking toward the glass lobby doors beyond, morning light casting long shadows across the pavement, corporate tower rising behind."
+    ]
+  },
+  {
+    "date": "2026-11-05",
+    "concepts": [
+      "A sustainability analyst over-the-shoulder at a dual-monitor setup, left screen showing supplier procurement records, right screen dark, morning light on the desk edge, attempting to reconcile two data sources.",
+      "Over-the-shoulder view of a logistics coordinator reviewing a freight-tracking interface on a wall-mounted display, hands raised mid-gesture toward unreadable route data, warehouse background soft and distant.",
+      "Over-the-shoulder framing of two professionals at a shared workstation, one pointing at an emissions calculation on screen (unreadable), the other holding printed supply-chain documentation, soft afternoon window light from the left."
     ]
   }
 ]
