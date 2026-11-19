@@ -1,13 +1,5 @@
 [
   {
-    "date": "2026-08-27",
-    "concepts": [
-      "Wide shot of a modern finance floor at golden hour, two figures at separate desks across the space\u2014one reviewing screens, the other at a tablet cross-referencing data\u2014afternoon light casting long shadows across the open plan.",
-      "A large wall-mounted display showing forecast dashboards (text unreadable) in soft focus, three figures standing at distance below it in discussion, the entire control room visible behind, cool ambient lighting.",
-      "Finance floor from an elevated angle, an audit table in the foreground with two figures reviewing printed reports side-by-side, the broader workspace and other workstations receding behind them, window light from the left."
-    ]
-  },
-  {
     "date": "2026-09-03",
     "concepts": [
       "An ML engineer seated at a workstation, side profile, reviewing multi-line forecast visualizations on a monitor angled away from camera, cool office light from the left.",
@@ -77,6 +69,14 @@
       "A sustainability analyst over-the-shoulder at a dual-monitor setup, left screen showing supplier procurement records, right screen dark, morning light on the desk edge, attempting to reconcile two data sources.",
       "Over-the-shoulder view of a logistics coordinator reviewing a freight-tracking interface on a wall-mounted display, hands raised mid-gesture toward unreadable route data, warehouse background soft and distant.",
       "Over-the-shoulder framing of two professionals at a shared workstation, one pointing at an emissions calculation on screen (unreadable), the other holding printed supply-chain documentation, soft afternoon window light from the left."
+    ]
+  },
+  {
+    "date": "2026-11-19",
+    "concepts": [
+      "Wide shot of a SaaS finance floor at golden hour, desks scattered across a large open space with floor-to-ceiling windows, multiple figures at workstations in soft focus, one figure standing near a glass-walled office in the middle distance.",
+      "A finance operations center viewed from the entrance, wall-mounted display panels showing real-time metrics (unreadable) across the far wall, a dozen seated figures in profile at individual stations, cool overhead lighting flooding the depth of the room.",
+      "Corner conference room seen from the hallway threshold, three figures seated at a long table with laptops open, a standing figure gesturing toward a wall-mounted screen, morning light diffusing through frosted glass partition, the wider office floor visible and blurred in deep background."
     ]
   }
 ]
